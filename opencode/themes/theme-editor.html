@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Theme Editor</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1a2e; color: #eee; min-height: 100vh; }
+    .container { display: flex; min-height: 100vh; }
+    .sidebar { width: 320px; background: #16213e; padding: 20px; overflow-y: auto; border-right: 1px solid #333; }
+    .preview { flex: 1; padding: 20px; overflow-y: auto; }
+    h2 { font-size: 18px; margin-bottom: 15px; color: #e94560; }
+    h3 { font-size: 14px; margin: 20px 0 10px; color: #888; text-transform: uppercase; letter-spacing: 1px; }
+    .color-item { display: flex; align-items: center; margin-bottom: 10px; }
+    .color-item label { flex: 1; font-size: 13px; }
+    .color-item input[type="color"] { width: 40px; height: 30px; border: none; cursor: pointer; background: none; }
+    .color-item input[type="text"] { width: 80px; padding: 4px 8px; margin-left: 10px; background: #0f3460; border: 1px solid #333; color: #fff; font-size: 12px; border-radius: 4px; }
+    .theme-items { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .theme-item { display: flex; flex-direction: column; gap: 4px; }
+    .theme-item label { font-size: 11px; color: #888; }
+    .theme-item select { padding: 6px; background: #0f3460; border: 1px solid #333; color: #fff; font-size: 12px; border-radius: 4px; }
+    .btn { display: block; width: 100%; padding: 12px; margin-top: 20px; background: #e94560; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
+    .btn:hover { background: #d63850; }
+    .preview-section { margin-bottom: 30px; }
+    .preview-card { padding: 20px; border-radius: 8px; margin-top: 10px; }
+    .preview-card.dark { background: var(--bg); color: var(--text); }
+    .preview-card.light { background: var(--bg); color: var(--text); }
+    .preview-card h4 { margin-bottom: 10px; }
+    .preview-card p { font-size: 13px; margin-bottom: 8px; }
+    .preview-card code { padding: 2px 6px; border-radius: 4px; font-size: 12px; }
+    .preview-card .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; margin-right: 5px; }
+    .preview-card pre { padding: 10px; border-radius: 4px; overflow-x: auto; font-size: 12px; margin-top: 10px; }
+    .color-swatches { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .swatch { width: 30px; height: 30px; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 10px; }
+    .tabs { display: flex; gap: 10px; margin-bottom: 20px; }
+    .tab { padding: 8px 16px; background: #0f3460; border: none; color: #888; cursor: pointer; border-radius: 4px; }
+    .tab.active { background: #e94560; color: #fff; }
+    .code-preview { background: #0f3460; padding: 15px; border-radius: 6px; font-family: monospace; font-size: 12px; overflow-x: auto; white-space: pre; }
+    .hover-info { position: relative; }
+    .hover-info:hover::after {
+      content: attr(data-color);
+      position: absolute;
+      bottom: 100%;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #333;
+      color: #fff;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      white-space: nowrap;
+      z-index: 100;
+      pointer-events: none;
+    }
+    .hover-info:hover { outline: 2px solid #e94560; outline-offset: 2px; }
+    .syntax-token:hover { position: relative; }
+    .syntax-token:hover::after {
+      content: attr(data-token);
+      position: absolute;
+      bottom: 100%;
+      left: 0;
+      background: #333;
+      color: #fff;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      z-index: 100;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="sidebar">
+      <h2>Color Definitions</h2>
+      <div id="defs-editor"></div>
+      <button class="btn" onclick="downloadTheme()">Download Theme JSON</button>
+    </div>
+    <div class="preview">
+      <div class="tabs">
+        <button class="tab active" onclick="setMode('dark')">Dark Preview</button>
+        <button class="tab" onclick="setMode('light')">Light Preview</button>
+      </div>
+      <div id="preview-content"></div>
+    </div>
+  </div>
+
+  <script>
+    let themeData = null;
+    let currentMode = 'dark';
+
+    const defaultTheme = {
+      "defs": {
+        "nord0": "#1387C0",
+        "nord1": "#3B4252",
+        "nord2": "#434C5E",
+        "nord3": "#4C566A",
+        "nord4": "#FAEDD1",
+        "nord5": "#E5E9F0",
+        "nord6": "#ECEFF4",
+        "nord7": "#8FBCBB",
+        "nord8": "#88C0D0",
+        "nord9": "#81A1C1",
+        "nord10": "#5E81AC",
+        "nord11": "#BF616A",
+        "nord12": "#D08770",
+        "nord13": "#EBCB8B",
+        "nord14": "#A3BE8C",
+        "nord15": "#B48EAD"
+      },
+      "theme": {
+        "primary": { "dark": "nord8", "light": "nord10" },
+        "secondary": { "dark": "nord9", "light": "nord9" },
+        "accent": { "dark": "nord7", "light": "nord7" },
+        "error": { "dark": "nord11", "light": "nord11" },
+        "warning": { "dark": "nord12", "light": "nord12" },
+        "success": { "dark": "nord14", "light": "nord14" },
+        "info": { "dark": "nord8", "light": "nord10" },
+        "text": { "dark": "nord4", "light": "nord0" },
+        "textMuted": { "dark": "nord3", "light": "nord1" },
+        "background": { "dark": "nord0", "light": "nord6" },
+        "backgroundPanel": { "dark": "nord1", "light": "nord5" },
+        "backgroundElement": { "dark": "nord1", "light": "nord4" },
+        "border": { "dark": "nord2", "light": "nord3" },
+        "borderActive": { "dark": "nord3", "light": "nord2" },
+        "borderSubtle": { "dark": "nord2", "light": "nord3" },
+        "diffAdded": { "dark": "nord14", "light": "nord14" },
+        "diffRemoved": { "dark": "nord11", "light": "nord11" },
+        "diffContext": { "dark": "nord3", "light": "nord3" },
+        "diffHunkHeader": { "dark": "nord3", "light": "nord3" },
+        "diffHighlightAdded": { "dark": "nord14", "light": "nord14" },
+        "diffHighlightRemoved": { "dark": "nord11", "light": "nord11" },
+        "diffAddedBg": { "dark": "#3B4252", "light": "#E5E9F0" },
+        "diffRemovedBg": { "dark": "#3B4252", "light": "#E5E9F0" },
+        "diffContextBg": { "dark": "nord1", "light": "nord5" },
+        "diffLineNumber": { "dark": "nord2", "light": "nord4" },
+        "diffAddedLineNumberBg": { "dark": "#3B4252", "light": "#E5E9F0" },
+        "diffRemovedLineNumberBg": { "dark": "#3B4252", "light": "#E5E9F0" },
+        "markdownText": { "dark": "nord4", "light": "nord0" },
+        "markdownHeading": { "dark": "nord8", "light": "nord10" },
+        "markdownLink": { "dark": "nord9", "light": "nord9" },
+        "markdownLinkText": { "dark": "nord7", "light": "nord7" },
+        "markdownCode": { "dark": "nord14", "light": "nord14" },
+        "markdownBlockQuote": { "dark": "nord3", "light": "nord3" },
+        "markdownEmph": { "dark": "nord12", "light": "nord12" },
+        "markdownStrong": { "dark": "nord13", "light": "nord13" },
+        "markdownHorizontalRule": { "dark": "nord3", "light": "nord3" },
+        "markdownListItem": { "dark": "nord8", "light": "nord10" },
+        "markdownListEnumeration": { "dark": "nord7", "light": "nord7" },
+        "markdownImage": { "dark": "nord9", "light": "nord9" },
+        "markdownImageText": { "dark": "nord7", "light": "nord7" },
+        "markdownCodeBlock": { "dark": "nord4", "light": "nord0" },
+        "syntaxComment": { "dark": "nord3", "light": "nord3" },
+        "syntaxKeyword": { "dark": "nord9", "light": "nord9" },
+        "syntaxFunction": { "dark": "nord8", "light": "nord8" },
+        "syntaxVariable": { "dark": "nord7", "light": "nord7" },
+        "syntaxString": { "dark": "nord14", "light": "nord14" },
+        "syntaxNumber": { "dark": "nord15", "light": "nord15" },
+        "syntaxType": { "dark": "nord7", "light": "nord7" },
+        "syntaxOperator": { "dark": "nord9", "light": "nord9" },
+        "syntaxPunctuation": { "dark": "nord4", "light": "nord0" }
+      }
+    };
+
+    function resolveColor(value) {
+      if (!value) return '#000000';
+      if (value.startsWith('#')) return value;
+      return themeData?.defs?.[value] || '#000000';
+    }
+
+    function init() {
+      themeData = JSON.parse(JSON.stringify(defaultTheme));
+      renderDefsEditor();
+      renderPreview();
+    }
+
+    function renderDefsEditor() {
+      const container = document.getElementById('defs-editor');
+      container.innerHTML = '';
+      
+      for (const [name, value] of Object.entries(themeData.defs)) {
+        const item = document.createElement('div');
+        item.className = 'color-item';
+        item.innerHTML = `
+          <label>${name}</label>
+          <input type="color" value="${value}" onchange="updateDef('${name}', this.value)">
+          <input type="text" value="${value}" onchange="updateDef('${name}', this.value)">
+        `;
+        container.appendChild(item);
+      }
+    }
+
+    function updateDef(name, value) {
+      themeData.defs[name] = value;
+      renderPreview();
+      document.querySelectorAll(`input[type="color"][onchange*="${name}"]`).forEach(el => el.value = value);
+      document.querySelectorAll(`input[type="text"][onchange*="${name}"]`).forEach(el => {
+        if (el.value !== value) el.value = value;
+      });
+    }
+
+    function setMode(mode) {
+      currentMode = mode;
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      event.target.classList.add('active');
+      renderPreview();
+    }
+
+    function renderPreview() {
+      const container = document.getElementById('preview-content');
+      const bg = resolveColor(themeData.theme.background[currentMode]);
+      const text = resolveColor(themeData.theme.text[currentMode]);
+      const primary = resolveColor(themeData.theme.primary[currentMode]);
+      const secondary = resolveColor(themeData.theme.secondary[currentMode]);
+      const accent = resolveColor(themeData.theme.accent[currentMode]);
+      const error = resolveColor(themeData.theme.error[currentMode]);
+      const success = resolveColor(themeData.theme.success[currentMode]);
+      const warning = resolveColor(themeData.theme.warning[currentMode]);
+      const info = resolveColor(themeData.theme.info[currentMode]);
+      const panelBg = resolveColor(themeData.theme.backgroundPanel[currentMode]);
+      const elemBg = resolveColor(themeData.theme.backgroundElement[currentMode]);
+      const border = resolveColor(themeData.theme.border[currentMode]);
+      const syntaxKeyword = resolveColor(themeData.theme.syntaxKeyword[currentMode]);
+      const syntaxString = resolveColor(themeData.theme.syntaxString[currentMode]);
+      const syntaxComment = resolveColor(themeData.theme.syntaxComment[currentMode]);
+      const syntaxFunction = resolveColor(themeData.theme.syntaxFunction[currentMode]);
+
+      container.innerHTML = `
+        <div class="preview-section">
+          <h3>UI Elements</h3>
+          <div class="preview-card ${currentMode}" style="--bg: ${bg}; --text: ${text}; --primary: ${primary}; --panel: ${panelBg}; --border: ${border}; background: ${panelBg}; color: ${text}; border: 1px solid ${border};">
+            <h4>Panel / Card</h4>
+            <p>Background: <span class="hover-info" data-color="backgroundPanel: ${themeData.theme.backgroundPanel[currentMode]}">■</span></p>
+            <p>Primary button: <button class="hover-info" data-color="primary: ${themeData.theme.primary[currentMode]}" style="background: ${primary}; color: ${bg}; border: none; padding: 4px 12px; border-radius: 4px;">Click me</button></p>
+            <p>Secondary button: <button class="hover-info" data-color="secondary: ${themeData.theme.secondary[currentMode]}" style="background: transparent; color: ${secondary}; border: 1px solid ${secondary}; padding: 4px 12px; border-radius: 4px;">Outline</button></p>
+            <p>Tags: 
+              <span class="tag hover-info" data-color="success: ${themeData.theme.success[currentMode]}" style="background: ${success}; color: ${bg}">success</span>
+              <span class="tag hover-info" data-color="error: ${themeData.theme.error[currentMode]}" style="background: ${error}; color: ${bg}">error</span>
+              <span class="tag hover-info" data-color="warning: ${themeData.theme.warning[currentMode]}" style="background: ${warning}; color: ${bg}">warning</span>
+              <span class="tag hover-info" data-color="info: ${themeData.theme.info[currentMode]}" style="background: ${info}; color: ${bg}">info</span>
+            </p>
+            <p>Input: <input class="hover-info" data-color="text: ${themeData.theme.text[currentMode]}, border: ${themeData.theme.border[currentMode]}" type="text" value="Sample text" style="background: ${elemBg}; color: ${text}; border: 1px solid ${border}; padding: 4px 8px; border-radius: 4px;"></p>
+          </div>
+        </div>
+
+        <div class="preview-section">
+          <h3>Code Syntax</h3>
+          <div class="code-preview" style="background: ${elemBg}; color: ${text};">
+<span class="syntax-token hover-info" data-token="syntaxComment: ${themeData.theme.syntaxComment[currentMode]}" style="color: ${syntaxComment}">// Comment</span>
+<span class="syntax-token hover-info" data-token="syntaxKeyword: ${themeData.theme.syntaxKeyword[currentMode]}" style="color: ${syntaxKeyword}">function</span> <span class="syntax-token hover-info" data-token="syntaxFunction: ${themeData.theme.syntaxFunction[currentMode]}" style="color: ${syntaxFunction}">hello</span>(<span class="syntax-token hover-info" data-token="syntaxKeyword: ${themeData.theme.syntaxKeyword[currentMode]}" style="color: ${syntaxKeyword}">name</span>) {
+  <span class="syntax-token hover-info" data-token="syntaxKeyword: ${themeData.theme.syntaxKeyword[currentMode]}" style="color: ${syntaxKeyword}">return</span> <span class="syntax-token hover-info" data-token="syntaxString: ${themeData.theme.syntaxString[currentMode]}" style="color: ${syntaxString}">"Hello, "</span> + name;
+}
+          </div>
+        </div>
+
+        <div class="preview-section">
+          <h3>Diff View</h3>
+          <div class="code-preview" style="background: ${elemBg}; color: ${text};">
+<span class="hover-info" data-color="diffRemoved: ${themeData.theme.diffRemoved[currentMode]}" style="color: ${resolveColor(themeData.theme.diffRemoved[currentMode])}">- const old = "removed";</span>
+<span class="hover-info" data-color="diffAdded: ${themeData.theme.diffAdded[currentMode]}" style="color: ${resolveColor(themeData.theme.diffAdded[currentMode])}">+ const added = "new";</span>
+<span class="hover-info" data-color="diffContext: ${themeData.theme.diffContext[currentMode]}" style="color: ${resolveColor(themeData.theme.diffContext[currentMode])}">  const unchanged = "same";</span>
+          </div>
+        </div>
+
+        <div class="preview-section">
+          <h3>Markdown Preview</h3>
+          <div class="preview-card ${currentMode}" style="background: ${bg}; color: ${text};">
+            <h1 class="hover-info" data-color="markdownHeading: ${themeData.theme.markdownHeading[currentMode]}" style="color: ${resolveColor(themeData.theme.markdownHeading[currentMode])}">Heading 1</h1>
+            <p>Regular text with <a href="#" class="hover-info" data-color="markdownLink: ${themeData.theme.markdownLink[currentMode]}" style="color: ${resolveColor(themeData.theme.markdownLink[currentMode])}">a link</a> and <code class="hover-info" data-color="markdownCode: ${themeData.theme.markdownCode[currentMode]}" style="background: ${elemBg}; padding: 2px 4px; border-radius: 3px;">inline code</code></p>
+            <blockquote class="hover-info" data-color="markdownBlockQuote: ${themeData.theme.markdownBlockQuote[currentMode]}, textMuted: ${themeData.theme.textMuted[currentMode]}" style="border-left: 3px solid ${resolveColor(themeData.theme.markdownBlockQuote[currentMode])}; padding-left: 10px; color: ${resolveColor(themeData.theme.textMuted[currentMode])}">Blockquote text</blockquote>
+            <p><strong class="hover-info" data-color="markdownStrong: ${themeData.theme.markdownStrong[currentMode]}" style="color: ${resolveColor(themeData.theme.markdownStrong[currentMode])}">Bold</strong> and <em class="hover-info" data-color="markdownEmph: ${themeData.theme.markdownEmph[currentMode]}" style="color: ${resolveColor(themeData.theme.markdownEmph[currentMode])}">italic</em></p>
+          </div>
+        </div>
+
+        <div class="preview-section">
+          <h3>Color Palette (${currentMode})</h3>
+          <div class="color-swatches">
+            ${Object.entries(themeData.defs).map(([name, color]) => 
+              `<div class="swatch" style="background: ${color}; color: ${isLight(color) ? '#000' : '#fff'}" title="${name}: ${color}">${name.replace('nord', 'N')}</div>`
+            ).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    function isLight(color) {
+      const hex = color.replace('#', '');
+      const r = parseInt(hex.substr(0, 2), 16);
+      const g = parseInt(hex.substr(2, 2), 16);
+      const b = parseInt(hex.substr(4, 2), 16);
+      return (r * 299 + g * 587 + b * 114) / 1000 > 128;
+    }
+
+    function downloadTheme() {
+      const blob = new Blob([JSON.stringify(themeData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'custom-theme.json';
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    init();
+  </script>
+</body>
+</html>
