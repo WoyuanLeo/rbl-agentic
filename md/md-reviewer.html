@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Markdown & YAML File Reviewer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            height: 100vh;
+            display: flex;
+        }
+        
+        .sidebar {
+            width: 250px;
+            background-color: #f5f5f5;
+            border-right: 1px solid #ddd;
+            overflow-y: auto;
+            padding: 20px;
+        }
+        
+        .sidebar h2 {
+            margin-bottom: 20px;
+            color: #333;
+        }
+        
+        .file-list {
+            list-style: none;
+        }
+        
+        .file-item {
+            padding: 10px;
+            margin-bottom: 5px;
+            background-color: white;
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border: 1px solid #eee;
+        }
+        
+        .file-item:hover {
+            background-color: #e9e9e9;
+        }
+        
+        .file-item.active {
+            background-color: #007acc;
+            color: white;
+        }
+        
+        .file-item.active .file-name {
+            color: white;
+        }
+        
+        .file-name {
+            font-weight: 500;
+            color: #333;
+            flex-grow: 1;
+        }
+        
+        .file-size {
+            font-size: 0.8em;
+            color: #666;
+        }
+        
+        .main-content {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+        }
+        
+        #markdown-preview {
+            line-height: 1.6;
+            text-align: left; /* Ensure text is left-aligned */
+        }
+        
+        .main-content h2 {
+            margin-bottom: 20px;
+            color: #333;
+        }
+        
+        #markdown-preview h1, #markdown-preview h2, #markdown-preview h3 {
+            color: #2c3e50;
+            margin-top: 1.5em;
+            margin-bottom: 0.5em;
+        }
+        
+        #markdown-preview p {
+            margin-bottom: 1em;
+        }
+        
+        #markdown-preview ul, #markdown-preview ol {
+            margin-left: 2em;
+            margin-bottom: 1em;
+        }
+        
+        #markdown-preview li {
+            margin-bottom: 0.5em;
+        }
+        
+        #markdown-preview a {
+            color: #007acc;
+            text-decoration: none;
+        }
+        
+        #markdown-preview a:hover {
+            text-decoration: underline;
+        }
+        
+        #markdown-preview blockquote {
+            border-left: 4px solid #ddd;
+            padding-left: 1em;
+            color: #666;
+            margin: 1em 0;
+        }
+        
+        #markdown-preview code {
+            background-color: #f8f8f8;
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+        }
+        
+        #markdown-preview pre {
+            background-color: #f8f8f8;
+            padding: 1em;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+        
+        #markdown-preview pre code {
+            background-color: transparent;
+            padding: 0;
+        }
+        
+        /* YAML Formatter Styles */
+        .yaml-tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        
+        .yaml-tab {
+            padding: 8px 16px;
+            background-color: #e0e0e0;
+            border: none;
+            border-radius: 4px 4px 0 0;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        
+        .yaml-tab.active {
+            background-color: #007acc;
+            color: white;
+        }
+        
+        .yaml-editor-container {
+            display: flex;
+            gap: 15px;
+            height: 500px;
+            margin-top: 15px;
+        }
+        
+        .yaml-editor-pane {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .yaml-editor-label {
+            font-weight: 500;
+            margin-bottom: 5px;
+            color: #333;
+        }
+        
+        .yaml-textarea {
+            flex: 1;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            resize: none;
+            background-color: #fff;
+        }
+        
+        .yaml-output {
+            flex: 1;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background-color: #f8f8f8;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            overflow-y: auto;
+        }
+        
+        .yaml-controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        
+        .yaml-formatted {
+            color: #2c3e50;
+            font-family: 'Courier New', monospace;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        .yaml-key {
+            color: #88166a;
+        }
+        
+        .yaml-string {
+            color: #c41a16;
+        }
+        
+        .yaml-number {
+            color: #1c00cf;
+        }
+        
+        .yaml-boolean {
+            color: #0d9488;
+        }
+        
+        .yaml-null {
+            color: #808080;
+        }
+        
+        .yaml-comment {
+            color: #008000;
+            font-style: italic;
+        }
+        
+        .no-file-selected {
+            text-align: center;
+            color: #666;
+            font-style: italic;
+            padding: 40px 20px;
+        }
+        
+        .file-path-display {
+            background-color: #f8f8f8;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 10px;
+            margin-bottom: 20px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            color: #333;
+            word-break: break-all;
+        }
+        
+        .file-input-section {
+            margin-bottom: 20px;
+        }
+        
+        .file-input-section label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+        }
+        
+        .file-input-section input[type="file"] {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        
+        .controls button {
+            padding: 8px 12px;
+            background-color: #007acc;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        
+        .controls button:hover {
+            background-color: #005a9e;
+        }
+        
+        .controls button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        
+        @media (max-width: 768px) {
+            body {
+                flex-direction: column;
+            }
+            
+            .sidebar {
+                width: 100%;
+                height: 200px;
+            }
+            
+            .main-content {
+                height: calc(100vh - 200px);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <h2>Markdown Files</h2>
+        <div class="file-input-section">
+            <label for="file-input">Select Markdown & YAML Files:</label>
+            <input type="file" id="file-input" accept=".md,.yaml,.yml" multiple>
+        </div>
+        <div class="file-input-section">
+            <label for="file-mode">View Mode:</label>
+            <select id="file-mode" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                <option value="markdown">Markdown Preview</option>
+                <option value="yaml">YAML Formatter</option>
+            </select>
+        </div>
+        <div class="controls">
+            <button id="clear-btn" disabled>Clear Selection</button>
+        </div>
+        <ul class="file-list" id="file-list">
+            <!-- File items will be added here -->
+        </ul>
+    </div>
+    
+    <!-- Main Content Area -->
+    <div class="main-content" id="markdown-panel">
+        <h2>Markdown Preview</h2>
+        <div id="file-path-display" class="file-path-display"></div>
+        <div id="markdown-preview" class="no-file-selected">
+            Select a markdown file to preview
+        </div>
+    </div>
+    
+    <!-- YAML Formatter Panel -->
+    <div class="main-content" id="yaml-formatter" style="display: none;">
+        <h2>YAML Formatter</h2>
+        <div class="yaml-tabs">
+            <button class="yaml-tab active" id="yaml-editor-tab">Editor</button>
+            <button class="yaml-tab" id="yaml-formatted-tab">Formatted</button>
+        </div>
+        <div id="yaml-tab-content">
+            <div id="yaml-editor-view">
+                <div class="yaml-editor-container">
+                    <div class="yaml-editor-pane">
+                        <div class="yaml-editor-label">Input YAML:</div>
+                        <textarea id="yaml-input" class="yaml-textarea" 
+                            placeholder="Paste or type your YAML here..."></textarea>
+                    </div>
+                    <div class="yaml-editor-pane">
+                        <div class="yaml-editor-label">Output (Formatted):</div>
+                        <div id="yaml-output" class="yaml-output"></div>
+                    </div>
+                </div>
+                <div class="yaml-controls">
+                    <button id="format-yaml-btn">Format YAML</button>
+                    <button id="clean-yaml-btn">Clear</button>
+                </div>
+            </div>
+            <div id="yaml-formatted-view" style="display: none;">
+                <div class="yaml-editor-pane">
+                    <div class="yaml-editor-label">Formatted Result:</div>
+                    <div id="yaml-display-output" class="yaml-formatted"></div>
+                </div>
+            </div>
+        </div>
+        <div id="yaml-file-path-display" class="file-path-display"></div>
+        <div id="yaml-preview-container" style="margin-top: 20px;">
+            <h3>YAML File Preview</h3>
+            <div id="yaml-content" class="yaml-formatted"></div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/js-yaml@4/dist/js-yaml.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const fileInput = document.getElementById('file-input');
+            const fileList = document.getElementById('file-list');
+            const markdownPreview = document.getElementById('markdown-preview');
+            const clearBtn = document.getElementById('clear-btn');
+            const fileModeSelect = document.getElementById('file-mode');
+            const yamlFormatterPanel = document.getElementById('yaml-formatter');
+            const yamlEditorTab = document.getElementById('yaml-editor-tab');
+            const yamlFormattedTab = document.getElementById('yaml-formatted-tab');
+            const yamlEditorView = document.getElementById('yaml-editor-view');
+            const yamlFormattedView = document.getElementById('yaml-formatted-view');
+            const yamlInput = document.getElementById('yaml-input');
+            const yamlOutput = document.getElementById('yaml-output');
+            const yamlDisplayOutput = document.getElementById('yaml-display-output');
+            const yamlFilePathDisplay = document.getElementById('yaml-file-path-display');
+            const yamlContent = document.getElementById('yaml-content');
+            
+            let selectedFiles = new Map(); // Map to store File objects by name
+            const filePathDisplay = document.getElementById('file-path-display');
+            let activeTab = 'editor'; // 'editor' or 'formatted'
+            let currentYamlFile = null;
+            
+            // Configure marked.js
+            marked.setOptions({
+                breaks: true,
+                gfm: true
+            });
+            
+            // Initialize mermaid
+            mermaid.initialize({ startOnLoad: false });
+            
+            // Handle file selection
+            fileInput.addEventListener('change', function(e) {
+                const files = e.target.files;
+                
+                for (let i = 0; i < files.length; i++) {
+                    const file = files[i];
+                    if (file.name.endsWith('.md')) {
+                        selectedFiles.set(file.name, file);
+                        addFileItem(file);
+                    }
+                }
+                
+                // Reset input to allow selecting same file again
+                fileInput.value = '';
+                updateClearButton();
+            });
+            
+            // Handle clear button
+            clearBtn.addEventListener('click', function() {
+                selectedFiles.clear();
+                fileList.innerHTML = '';
+                filePathDisplay.textContent = '';
+                markdownPreview.innerHTML = '<div class="no-file-selected">Select a markdown file to preview</div>';
+                markdownPreview.className = 'no-file-selected'; // Reset class
+                updateClearButton();
+            });
+            
+            // Add file item to list
+            function addFileItem(file) {
+                const li = document.createElement('li');
+                li.className = 'file-item';
+                li.dataset.filename = file.name;
+                
+                li.innerHTML = `
+                    <div class="file-info">
+                        <span class="file-name">${file.name}</span>
+                        <span class="file-size">${formatFileSize(file.size)}</span>
+                    </div>
+                `;
+                
+                li.addEventListener('click', function() {
+                    // Update active state
+                    document.querySelectorAll('.file-item').forEach(item => {
+                        item.classList.remove('active');
+                    });
+                    this.classList.add('active');
+                    
+                    // Display file path
+                    const filePath = file.webkitRelativePath || file.name;
+                    filePathDisplay.textContent = filePath;
+                    
+                    // Read and display file content
+                    const reader = new FileReader();
+                    reader.onload = async function(e) {
+                        const markdownText = e.target.result;
+                        const htmlContent = marked.parse(markdownText);
+                        markdownPreview.innerHTML = htmlContent;
+                        // Remove the no-file-selected class when we have content
+                        markdownPreview.classList.remove('no-file-selected');
+                        
+                        // Render mermaid diagrams
+                        await mermaid.run({
+                            querySelector: '.mermaid'
+                        });
+                    };
+                    reader.onerror = function() {
+                        markdownPreview.innerHTML = '<div class="error">Error reading file</div>';
+                    };
+                    reader.readAsText(file);
+                });
+                
+                fileList.appendChild(li);
+            }
+            
+            // Update clear button state
+            function updateClearButton() {
+                clearBtn.disabled = selectedFiles.size === 0;
+            }
+            
+            // Format file size
+            function formatFileSize(bytes) {
+                if (bytes === 0) return '0 Bytes';
+                const k = 1024;
+                const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+                const i = Math.floor(Math.log(bytes) / Math.log(k));
+                return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+            }
+            
+            // Handle mode change (Markdown/YAML)
+            fileModeSelect.addEventListener('change', function() {
+                const mode = this.value;
+                const markdownPanel = document.getElementById('markdown-panel');
+                if (mode === 'markdown') {
+                    markdownPanel.style.display = 'block';
+                    yamlFormatterPanel.style.display = 'none';
+                } else {
+                    markdownPanel.style.display = 'none';
+                    yamlFormatterPanel.style.display = 'block';
+                }
+            });
+            
+            // Initialize view mode based on file type
+            function initializeViewMode(filename) {
+                const markdownPanel = document.getElementById('markdown-panel');
+                if (filename.endsWith('.yaml') || filename.endsWith('.yml')) {
+                    fileModeSelect.value = 'yaml';
+                    markdownPanel.style.display = 'none';
+                    yamlFormatterPanel.style.display = 'block';
+                } else {
+                    fileModeSelect.value = 'markdown';
+                    markdownPanel.style.display = 'block';
+                    yamlFormatterPanel.style.display = 'none';
+                }
+            }
+            
+            // YAML highlighting function
+            function highlightYaml(yamlString) {
+                if (!yamlString) return '';
+                
+                // Escape HTML first to prevent XSS
+                let escaped = yamlString
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;');
+                
+                // Process line by line to handle indentation properly
+                const lines = escaped.split('\n');
+                const highlightedLines = lines.map(line => {
+                    let processedLine = line;
+                    
+                    // Comments (must be processed first)
+                    if (processedLine.trim().startsWith('#')) {
+                        return '<span class="yaml-comment">' + processedLine + '</span>';
+                    }
+                    
+                    // Check for key-value pair
+                    const keyMatch = processedLine.match(/^(\s*)([^:]+)(:)(.*)$/);
+                    if (keyMatch) {
+                        const indent = keyMatch[1];
+                        const key = keyMatch[2];
+                        const colon = keyMatch[3];
+                        let value = keyMatch[4];
+                        
+                        // Highlight the key
+                        processedLine = indent + '<span class="yaml-key">' + key + '</span>' + colon;
+                        
+                        // Process the value
+                        if (value) {
+                            value = value.trim();
+                            
+                            // Check for null value
+                            if (value === 'null' || value === '~') {
+                                processedLine += ' <span class="yaml-null">' + value + '</span>';
+                            }
+                            // Check for boolean
+                            else if (value === 'true' || value === 'false' || value === 'yes' || value === 'no' || value === 'on' || value === 'off') {
+                                processedLine += ' <span class="yaml-boolean">' + value + '</span>';
+                            }
+                            // Check for number
+                            else if (/^-?\d+(\.\d+)?$/.test(value)) {
+                                processedLine += ' <span class="yaml-number">' + value + '</span>';
+                            }
+                            // Check for quoted string
+                            else if (/^['"].*['"]$/.test(value)) {
+                                processedLine += ' <span class="yaml-string">' + value + '</span>';
+                            }
+                            // Plain string or other
+                            else if (value.length > 0) {
+                                processedLine += ' <span class="yaml-string">' + value + '</span>';
+                            }
+                        }
+                        return processedLine;
+                    }
+                    
+                    // Check for array item (-)
+                    if (processedLine.match(/^\s*-\s+/)) {
+                        return processedLine.replace(/^(\s*-\s+)(.*)$/, function(match, dash, val) {
+                            let highlighted = dash;
+                            val = val.trim();
+                            if (val === 'null' || val === '~') {
+                                highlighted += '<span class="yaml-null">' + val + '</span>';
+                            } else if (val === 'true' || val === 'false' || val === 'yes' || val === 'no') {
+                                highlighted += '<span class="yaml-boolean">' + val + '</span>';
+                            } else if (/^-?\d+(\.\d+)?$/.test(val)) {
+                                highlighted += '<span class="yaml-number">' + val + '</span>';
+                            } else if (/^['"].*['"]$/.test(val)) {
+                                highlighted += '<span class="yaml-string">' + val + '</span>';
+                            } else {
+                                highlighted += val;
+                            }
+                            return highlighted;
+                        });
+                    }
+                    
+                    return processedLine;
+                });
+                
+                return highlightedLines.join('\n');
+            }
+            
+            function formatYaml(yamlString) {
+                try {
+                    const obj = jsyaml.load(yamlString);
+                    const formatted = jsyaml.dump(obj, {
+                        indent: 2,
+                        lineWidth: -1, // Don't wrap lines
+                        noRefs: true
+                    });
+                    return { success: true, output: formatted };
+                } catch (error) {
+                    return { success: false, error: error.message };
+                }
+            }
+            
+            // Handle YAML tab switching
+            yamlEditorTab.addEventListener('click', function() {
+                activeTab = 'editor';
+                yamlEditorTab.classList.add('active');
+                yamlFormattedTab.classList.remove('active');
+                yamlEditorView.style.display = 'block';
+                yamlFormattedView.style.display = 'none';
+            });
+            
+            yamlFormattedTab.addEventListener('click', function() {
+                activeTab = 'formatted';
+                yamlFormattedTab.classList.add('active');
+                yamlEditorTab.classList.remove('active');
+                yamlEditorView.style.display = 'none';
+                yamlFormattedView.style.display = 'block';
+                // Re-display the formatted output
+                yamlDisplayOutput.innerHTML = highlightYaml(yamlOutput.textContent.trim());
+            });
+            
+            // Handle format YAML button
+            document.getElementById('format-yaml-btn').addEventListener('click', function() {
+                const inputYaml = yamlInput.value;
+                const result = formatYaml(inputYaml);
+                
+                if (result.success) {
+                    yamlOutput.textContent = result.output;
+                    if (activeTab === 'formatted') {
+                        yamlDisplayOutput.innerHTML = highlightYaml(result.output);
+                    } else {
+                        yamlOutput.innerHTML = highlightYaml(result.output);
+                    }
+                } else {
+                    yamlOutput.textContent = 'Error: ' + result.error;
+                    if (activeTab === 'formatted') {
+                        yamlDisplayOutput.textContent = 'Error: ' + result.error;
+                    }
+                }
+            });
+            
+            // Handle clean/clear YAML button
+            document.getElementById('clean-yaml-btn').addEventListener('click', function() {
+                yamlInput.value = '';
+                yamlOutput.textContent = '';
+                yamlDisplayOutput.textContent = '';
+            });
+            
+            // Real-time formatting as user types
+            let typeTimer;
+            yamlInput.addEventListener('input', function() {
+                clearTimeout(typeTimer);
+                typeTimer = setTimeout(function() {
+                    const inputYaml = yamlInput.value;
+                    if (inputYaml.trim().length > 0) {
+                        const result = formatYaml(inputYaml);
+                        if (result.success) {
+                            yamlOutput.textContent = result.output;
+                            if (activeTab === 'formatted') {
+                                yamlDisplayOutput.innerHTML = highlightYaml(result.output);
+                            } else {
+                                yamlOutput.innerHTML = highlightYaml(result.output);
+                            }
+                        }
+                    }
+                }, 500); // Debounce for 500ms
+            });
+            
+            // Handle YAML file click
+            function addYamlFileItem(file) {
+                const li = document.createElement('li');
+                li.className = 'file-item';
+                li.dataset.filename = file.name;
+                
+                li.innerHTML = `
+                    <div class="file-info">
+                        <span class="file-name">${file.name}</span>
+                        <span class="file-size">${formatFileSize(file.size)}</span>
+                    </div>
+                `;
+                
+                li.addEventListener('click', function() {
+                    // Update active state
+                    document.querySelectorAll('.file-item').forEach(item => {
+                        item.classList.remove('active');
+                    });
+                    this.classList.add('active');
+                    
+                    // Display file path
+                    const yamlFilePath = file.webkitRelativePath || file.name;
+                    yamlFilePathDisplay.textContent = yamlFilePath;
+                    
+                    // Read and display file content
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        const yamlText = e.target.result;
+                        
+                        // Try to format and display the YAML
+                        try {
+                            const obj = jsyaml.load(yamlText);
+                            const formatted = jsyaml.dump(obj, {
+                                indent: 2,
+                                lineWidth: -1,
+                                noRefs: true
+                            });
+                            
+                            // Fill the editor
+                            yamlInput.value = yamlText;
+                            yamlOutput.innerHTML = highlightYaml(formatted);
+                            yamlDisplayOutput.innerHTML = highlightYaml(formatted);
+                            
+                            // Switch to YAML mode
+                            fileModeSelect.value = 'yaml';
+                            const markdownPanel = document.getElementById('markdown-panel');
+                            markdownPanel.style.display = 'none';
+                            yamlFormatterPanel.style.display = 'block';
+                        } catch (error) {
+                            // If YAML parsing fails, display raw content
+                            yamlInput.value = yamlText;
+                            yamlOutput.textContent = 'Error parsing YAML: ' + error.message;
+                            yamlDisplayOutput.textContent = 'Error parsing YAML: ' + error.message;
+                        }
+                    };
+                    reader.onerror = function() {
+                        yamlOutput.textContent = 'Error reading file';
+                        yamlDisplayOutput.textContent = 'Error reading file';
+                    };
+                    reader.readAsText(file);
+                    currentYamlFile = file;
+                });
+                
+                fileList.appendChild(li);
+            }
+            
+            // Handle file selection
+            fileInput.addEventListener('change', function(e) {
+                const files = e.target.files;
+                
+                for (let i = 0; i < files.length; i++) {
+                    const file = files[i];
+                    if (file.name.endsWith('.md')) {
+                        selectedFiles.set(file.name, file);
+                        addFileItem(file);
+                    } else if (file.name.endsWith('.yaml') || file.name.endsWith('.yml')) {
+                        selectedFiles.set(file.name, file);
+                        addYamlFileItem(file);
+                    }
+                }
+                
+                // Reset input to allow selecting same file again
+                fileInput.value = '';
+                updateClearButton();
+            });
+            
+            // Handle clear button
+            clearBtn.addEventListener('click', function() {
+                selectedFiles.clear();
+                fileList.innerHTML = '';
+                filePathDisplay.textContent = '';
+                markdownPreview.innerHTML = '<div class="no-file-selected">Select a markdown file to preview</div>';
+                markdownPreview.className = 'no-file-selected'; // Reset class
+                yamlInput.value = '';
+                yamlOutput.innerHTML = '';
+                yamlDisplayOutput.innerHTML = '';
+                yamlFilePathDisplay.textContent = '';
+                // Reset to markdown view
+                const markdownPanel = document.getElementById('markdown-panel');
+                markdownPanel.style.display = 'block';
+                yamlFormatterPanel.style.display = 'none';
+                fileModeSelect.value = 'markdown';
+                updateClearButton();
+            });
+        });
+    </script>
+</body>
+</html>
