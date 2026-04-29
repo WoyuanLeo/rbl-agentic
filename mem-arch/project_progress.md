@@ -1,25 +1,25 @@
-# Memory Orchestration System - Project Progress
+# Memory Orchestration System — Project Progress
 
 ## Overview
 
-Tracking implementation of the memory-driven orchestration system across 4 phases.
+Tracking implementation of the memory-driven orchestration system across 4 phases plus post-launch optimisations.
 
-**Status:** 🟢 Complete — All 4 phases built successfully
+**Status:** 🟢 Complete — All 4 phases built + optimisation pass applied
 
 ---
 
 ## Phase 1: Memory Plugin (Persistence Layer)
 
 | Task | File | Status |
-|------|------|--------|
+|---|---|---|
 | 1.1 SQLite storage handler | `packages/memory/src/db.ts` | ✅ Complete |
 | 1.2 SQL schema definitions | `packages/memory/src/schema.ts` | ✅ Complete |
 | 1.3 Plugin entry point | `packages/memory/src/index.ts` | ✅ Complete |
-| 1.4 Capture hook (chat.message) | `packages/memory/src/index.ts` | ✅ Complete |
-| 1.5 Replay hook (messages.transform) | `packages/memory/src/index.ts` | ✅ Complete |
-| 1.6 Search tool (global_memory_query) | `packages/memory/src/index.ts` | ✅ Complete |
+| 1.4 Capture hook (`chat.message`) | `packages/memory/src/index.ts` | ✅ Complete |
+| 1.5 ~~Replay hook (`messages.transform`)~~ | removed — duplicate capture | ✅ Fixed |
+| 1.6 Search tool (`global_memory_query`) | `packages/memory/src/index.ts` | ✅ Complete |
 | 1.7 Progress tracking tools | `packages/memory/src/index.ts` | ✅ Complete |
-| 1.8 Progress hook (tool.execute.after) | `packages/memory/src/index.ts` | ✅ Complete |
+| 1.8 Progress hook (`tool.execute.after`) | `packages/memory/src/index.ts` | ✅ Complete |
 | 1.9 System transform hook | `packages/memory/src/index.ts` | ✅ Complete |
 | 1.10 Package config | `packages/memory/package.json` | ✅ Complete |
 
@@ -28,7 +28,7 @@ Tracking implementation of the memory-driven orchestration system across 4 phase
 ## Phase 2: Coordination Plugin (Intelligence Layer)
 
 | Task | File | Status |
-|------|------|--------|
+|---|---|---|
 | 2.1 Coordinator agent config | `packages/coordination/src/coordinator-agent.ts` | ✅ Complete |
 | 2.2 System prompt | `packages/coordination/src/system-prompt.txt` | ✅ Complete |
 | 2.3 Analysis engine | `packages/coordination/src/analyze.ts` | ✅ Complete |
@@ -41,7 +41,7 @@ Tracking implementation of the memory-driven orchestration system across 4 phase
 ## Phase 3: Orchestration Workflow
 
 | Task | File | Status |
-|------|------|--------|
+|---|---|---|
 | 3.1 Task decomposition | `packages/coordination/src/orchestrate.ts` | ✅ Complete |
 | 3.2 ParallelSubtaskPart type | `packages/coordination/src/orchestrate.ts` | ✅ Complete |
 | 3.3 Parallel execution | `packages/coordination/src/orchestrate.ts` | ✅ Complete |
@@ -52,7 +52,7 @@ Tracking implementation of the memory-driven orchestration system across 4 phase
 ## Phase 4: Distribution Plugin (Remote Agents)
 
 | Task | File | Status |
-|------|------|--------|
+|---|---|---|
 | 4.1 Service discovery | `packages/distribution/src/node.ts` | ✅ Complete |
 | 4.2 HTTP client | `packages/distribution/src/http-client.ts` | ✅ Complete |
 | 4.3 Task serialization | `packages/distribution/src/http-client.ts` | ✅ Complete |
@@ -67,25 +67,92 @@ Tracking implementation of the memory-driven orchestration system across 4 phase
 
 ---
 
+## Phase 5: Optimisation & Bug Fixes
+
+### 5.1 Memory Layer
+
+| Task | File | Status |
+|---|---|---|
+| Fix: `queryMessages` always joining FTS table even without text search | `packages/memory/src/db.ts` | ✅ Fixed |
+| Fix: duplicate message capture via two hooks writing same turns | `packages/memory/src/index.ts` | ✅ Fixed |
+| Add: `pruneMemory(olderThanMs)` — evict old records, keep DB bounded | `packages/memory/src/db.ts` | ✅ Added |
+| Add: auto-prune every 100 inserts (30-day retention) | `packages/memory/src/index.ts` | ✅ Added |
+
+### 5.2 Coordination — Analysis
+
+| Task | File | Status |
+|---|---|---|
+| Add: `confidence` score (0–1) to `AnalysisResult` | `packages/coordination/src/analyze.ts` | ✅ Added |
+| Fix: parallel groups never generated (single root task per template) | `packages/coordination/src/analyze.ts` | ✅ Fixed |
+| Add: two independent root tasks per template to enable real parallel groups | `packages/coordination/src/analyze.ts` | ✅ Added |
+| Add: `migrate/port/convert` template (was missing) | `packages/coordination/src/analyze.ts` | ✅ Added |
+| Add: confidence-gated system prompt injection (skip if < 0.5) | `packages/memory/src/index.ts` | ✅ Added |
+| Add: `LLMDelegate` type + `analyzeWithFallback()` — LLM path when confidence < 0.5 | `packages/coordination/src/analyze.ts` | ✅ Added |
+| Add: `buildLLMUserMessage()` — focused context builder for LLM call | `packages/coordination/src/analyze.ts` | ✅ Added |
+| Add: `parseLLMResponse()` — robust JSON extraction from LLM output | `packages/coordination/src/analyze.ts` | ✅ Added |
+| Wire: `ctx.complete` as `LLMDelegate` in plugin `triggerAnalysis()` | `packages/memory/src/index.ts` | ✅ Added |
+
+### 5.3 Coordination — Agent Registry
+
+| Task | File | Status |
+|---|---|---|
+| Add: `agent-registry.ts` — skill/cost registry for all 10 agents | `packages/coordination/src/agent-registry.ts` | ✅ Added |
+| Add: `TaskType` tags (11 types) | `packages/coordination/src/agent-registry.ts` | ✅ Added |
+| Add: `TaskComplexity` levels + complexity → required skill mapping | `packages/coordination/src/agent-registry.ts` | ✅ Added |
+| Add: `inferComplexity(text)` — regex-based complexity inference | `packages/coordination/src/agent-registry.ts` | ✅ Added |
+| Add: `inferTaskTypes(text)` — regex-based task type inference | `packages/coordination/src/agent-registry.ts` | ✅ Added |
+| Add: `selectAgent(types, complexity, budgetCap?)` — cheapest-sufficient selection | `packages/coordination/src/agent-registry.ts` | ✅ Added |
+| Add: `escalateAgent(current, types)` — next-tier-up for retry | `packages/coordination/src/agent-registry.ts` | ✅ Added |
+
+### 5.4 Coordination — Orchestration
+
+| Task | File | Status |
+|---|---|---|
+| Fix: parallel group execution was sequential (no actual `forkIn`) | `packages/coordination/src/orchestrate.ts` | ✅ Fixed |
+| Fix: `decomposeGoal` used hardcoded agent names | `packages/coordination/src/orchestrate.ts` | ✅ Fixed |
+| Add: `DecomposeOptions` (`budgetCap`, `complexity` override) | `packages/coordination/src/orchestrate.ts` | ✅ Added |
+| Add: registry-driven agent selection in all decomposition templates | `packages/coordination/src/orchestrate.ts` | ✅ Added |
+| Add: parallel group auto-detection when root tasks share same agent | `packages/coordination/src/orchestrate.ts` | ✅ Added |
+| Add: escalation-on-failure in `executePlan` sequential loop | `packages/coordination/src/orchestrate.ts` | ✅ Added |
+| Fix: naive keyword extraction in `filterContextForTask` | `packages/coordination/src/orchestrate.ts` | ✅ Fixed |
+| Add: bigram extraction + 50-word stopword list + early-exit | `packages/coordination/src/orchestrate.ts` | ✅ Added |
+
+### 5.5 Distribution
+
+| Task | File | Status |
+|---|---|---|
+| Fix: `sendBatch` was looping and re-sending all tasks on each iteration | `packages/distribution/src/http-client.ts` | ✅ Fixed |
+
+### 5.6 Exports
+
+| Task | File | Status |
+|---|---|---|
+| Export `analyzeWithFallback`, `LLMDelegate` | `packages/coordination/src/index.ts` | ✅ Added |
+| Export `DecomposeOptions` | `packages/coordination/src/index.ts` | ✅ Added |
+| Export all `agent-registry.ts` symbols and types | `packages/coordination/src/index.ts` | ✅ Added |
+
+---
+
 ## Shared
 
 | Task | File | Status |
-|------|------|--------|
-| Root package.json | `package.json` | ✅ Complete |
-| Root tsconfig.json | `tsconfig.json` | ✅ Complete |
+|---|---|---|
+| Root `package.json` | `package.json` | ✅ Complete |
+| Root `tsconfig.json` | `tsconfig.json` | ✅ Complete |
 
 ---
 
 ## Summary
 
-- **Total Tasks:** 32
-- **Completed:** 31
-- **Remaining:** 1 (core registry entry - separate PR)
+- **Total Tasks:** 58
+- **Completed:** 57
+- **Remaining:** 1 (core registry entry — separate PR)
 
 ## Build Status
 
 ```
-$ npm run build
+$ bun run build
+
 > @mem-arch/coordination@1.0.0 build
 > tsc
 ✅ OK

@@ -20,6 +20,9 @@ export const MemoryPlugin: Plugin = async (ctx: PluginInput) => {
   let lastAnalysis = ""
   let lastAnalysisAt = 0
   const ANALYSIS_TTL = 60_000
+  // Auto-prune: keep messages from the last 30 days; check every 100 inserts
+  const PRUNE_AFTER_MS = 30 * 24 * 60 * 60 * 1000
+  let insertsSincePrune = 0
 
   async function triggerAnalysis(): Promise<void> {
     const now = Date.now()
@@ -28,9 +31,28 @@ export const MemoryPlugin: Plugin = async (ctx: PluginInput) => {
     try {
       // @ts-expect-error dynamic import
       const mod = await import("@mem-arch/coordination/analyze")
-      if (typeof mod.analyze === "function") {
-        lastAnalysis = mod.analyze(db)
+      if (typeof mod.analyzeWithFallback !== "function") return
+
+      // Build an LLMDelegate if ctx exposes a model completion API.
+      // ctx.complete is OpenCode's built-in single-turn model call (no tool loop).
+      let llmDelegate: ((sys: string, msg: string) => Promise<string>) | undefined
+      if (typeof (ctx as any).complete === "function") {
+        llmDelegate = async (systemPrompt: string, userMessage: string) => {
+          return (ctx as any).complete({ system: systemPrompt, prompt: userMessage }) as Promise<string>
+        }
       }
+
+      // Load the coordinator system prompt from coordination package
+      let systemPrompt: string | undefined
+      try {
+        // @ts-expect-error dynamic import
+        const coordMod = await import("@mem-arch/coordination/coordinator-agent")
+        systemPrompt = typeof coordMod.getCoordinatorPrompt === "function"
+          ? coordMod.getCoordinatorPrompt()
+          : undefined
+      } catch { /* system prompt optional */ }
+
+      lastAnalysis = await mod.analyzeWithFallback(db, llmDelegate, systemPrompt)
     } catch {
       // Coordinator not available; skip silently
     }
@@ -96,45 +118,41 @@ export const MemoryPlugin: Plugin = async (ctx: PluginInput) => {
         created_at: Date.now(),
       })
 
+      insertsSincePrune++
+      if (insertsSincePrune >= 100) {
+        insertsSincePrune = 0
+        db.pruneMemory(PRUNE_AFTER_MS)
+      }
+
       const count = db.getMemoryCount()
       if (count % 10 === 0) {
         await triggerAnalysis()
       }
     },
 
-    "experimental.chat.messages.transform": async (_input, output): Promise<void> => {
-      const now = Date.now()
-      const msgs = output as { messages: Array<{ info: Record<string, unknown>; parts: unknown[] }> }
-
-      for (const { info, parts } of msgs.messages) {
-        const content = extractContent(parts)
-        if (!content) continue
-
-        const infoAny = info as Record<string, any>
-        const createdAt = (infoAny.time?.created ?? now) as number
-        const providerID = (infoAny.model?.providerID ?? infoAny.providerID) as string | undefined
-        const modelID = (infoAny.model?.modelID ?? infoAny.modelID) as string | undefined
-        const variant = (infoAny.model?.variant ?? infoAny.variant) as string | undefined
-
-        db.insertMessage({
-          session_id: infoAny.sessionID as string,
-          agent: (infoAny.agent ?? null) as string | null,
-          provider_id: providerID ?? null,
-          model_id: modelID ?? null,
-          message_id: (infoAny.id ?? null) as string | null,
-          variant: variant ?? null,
-          role: infoAny.role as "user" | "assistant",
-          content,
-          created_at: createdAt,
-        })
-      }
-    },
+    // NOTE: experimental.chat.messages.transform is intentionally omitted here.
+    // The chat.message hook already captures every turn as it arrives; using
+    // both hooks would write duplicate rows to the memory table.
 
     "experimental.chat.system.transform": async (_input, output): Promise<void> => {
       await triggerAnalysis()
       if (lastAnalysis) {
-        const out = output as { system: string[] }
-        out.system.push(`<coordinator_guidance>\n${lastAnalysis}\n</coordinator_guidance>`)
+        // Only pay the token cost if the analysis is actionable
+        let shouldInject = false
+        try {
+          // @ts-expect-error dynamic import
+          const mod = await import("@mem-arch/coordination/analyze")
+          const threshold: number = mod.INJECT_CONFIDENCE_THRESHOLD ?? 0.5
+          const parsed = JSON.parse(lastAnalysis) as { confidence?: number }
+          shouldInject = (parsed.confidence ?? 0) >= threshold
+        } catch {
+          // If we can't parse confidence, fall back to injecting
+          shouldInject = true
+        }
+        if (shouldInject) {
+          const out = output as { system: string[] }
+          out.system.push(`<coordinator_guidance>\n${lastAnalysis}\n</coordinator_guidance>`)
+        }
       }
     },
 

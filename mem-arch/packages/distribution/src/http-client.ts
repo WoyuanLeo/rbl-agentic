@@ -52,20 +52,19 @@ export const HttpClient = {
   sendBatch: (nodeUrl: string, tasks: unknown[]): Effect.Effect<number, Error> =>
     Effect.tryPromise({
       try: async () => {
-        let sent = 0
-        for (const task of tasks) {
-          try {
-            const res = await fetch(`${nodeUrl}/api/task/batch`, {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({ tasks: tasks.map((t) => (typeof t === "string" ? t : JSON.stringify(t))) }),
-            })
-            if (res.ok) sent++
-          } catch {
-            // Skip failed tasks
-          }
+        const serialized = tasks.map((t) => (typeof t === "string" ? t : JSON.stringify(t)))
+        const res = await fetch(`${nodeUrl}/api/task/batch`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ tasks: serialized }),
+        })
+        if (!res.ok) {
+          const body = await res.text().catch(() => "")
+          throw new Error(`HTTP ${res.status} sending batch to ${nodeUrl}: ${body}`)
         }
-        return sent
+        // Server should return how many tasks were accepted; fall back to full count
+        const json = await res.json().catch(() => ({ accepted: tasks.length })) as { accepted?: number }
+        return json.accepted ?? tasks.length
       },
       catch: (e) => e instanceof Error ? e : new Error(String(e)),
     }),

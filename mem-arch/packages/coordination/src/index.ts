@@ -55,9 +55,11 @@ export const CoordinationPlugin: Plugin = async (_ctx: PluginInput) => {
   }
 }
 
-export { analyze } from "./analyze.js"
+export { analyze, analyzeWithFallback } from "./analyze.js"
 export { coordinatorAgentConfig, getCoordinatorPrompt, coordinatorPermissions, coordinatorRegistryEntry } from "./coordinator-agent.js"
 export { decomposeGoal, executePlan, executeSubAgent, filterContextForTask } from "./orchestrate.js"
+export { AGENT_REGISTRY, getAgentProfile, selectAgent, escalateAgent, inferComplexity, inferTaskTypes } from "./agent-registry.js"
 
-export type { AnalysisResult } from "./analyze.js"
-export type { Task, ParallelGroup, OrchestrationPlan, TaskResult } from "./orchestrate.js"
+export type { AnalysisResult, LLMDelegate } from "./analyze.js"
+export type { Task, ParallelGroup, OrchestrationPlan, TaskResult, DecomposeOptions } from "./orchestrate.js"
+export type { AgentProfile, CostTier, TaskType, TaskComplexity, SelectionResult } from "./agent-registry.js"

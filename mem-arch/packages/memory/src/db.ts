@@ -61,6 +61,8 @@ export interface MemoryDB {
   getMemoryCount(): number
   upsertTask(params: UpsertTaskParams): void
   queryTasks(params: QueryTaskParams): TaskRow[]
+  /** Delete memory rows older than `olderThanMs` milliseconds. Returns deleted row count. */
+  pruneMemory(olderThanMs: number): number
 }
 
 export function openDatabase(projectDir: string): MemoryDB {
@@ -108,29 +110,30 @@ export function openDatabase(projectDir: string): MemoryDB {
     },
 
     queryMessages(params: QueryMessagesParams): MemoryRow[] {
-      const conditions: string[] = []
-      const binds: (string | number)[] = []
+      const limit = params.limit ?? 10
 
-      if (params.query) {
-        conditions.push("mf.content MATCH ?")
-        binds.push(params.query)
+      // Fast path: no full-text search needed — skip the FTS join entirely
+      if (!params.query) {
+        const conditions: string[] = []
+        const binds: (string | number)[] = []
+        if (params.session_id) { conditions.push("session_id = ?"); binds.push(params.session_id) }
+        if (params.role) { conditions.push("role = ?"); binds.push(params.role) }
+        const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : ""
+        const orderBy = params.rank_by === "oldest" ? "created_at ASC" : "created_at DESC"
+        return db.query(`SELECT * FROM memory ${where} ORDER BY ${orderBy} LIMIT ?`).all(...binds, limit) as MemoryRow[]
       }
-      if (params.session_id) {
-        conditions.push("m.session_id = ?")
-        binds.push(params.session_id)
-      }
-      if (params.role) {
-        conditions.push("m.role = ?")
-        binds.push(params.role)
-      }
+
+      // FTS path: full-text search with optional filters
+      const conditions: string[] = ["mf.content MATCH ?"]
+      const binds: (string | number)[] = [params.query]
+      if (params.session_id) { conditions.push("m.session_id = ?"); binds.push(params.session_id) }
+      if (params.role) { conditions.push("m.role = ?"); binds.push(params.role) }
 
       let orderBy = "bm25(memory_fts) ASC"
       if (params.rank_by === "newest") orderBy = "m.created_at DESC"
       if (params.rank_by === "oldest") orderBy = "m.created_at ASC"
 
-      const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : ""
-      const limit = params.limit ?? 10
-
+      const where = `WHERE ${conditions.join(" AND ")}`
       const sql = `SELECT m.* FROM memory m INNER JOIN memory_fts mf ON m.id = mf.rowid ${where} ORDER BY ${orderBy} LIMIT ?`
       return db.query(sql).all(...binds, limit) as MemoryRow[]
     },
@@ -165,6 +168,12 @@ export function openDatabase(projectDir: string): MemoryDB {
       return db.query(
         `SELECT * FROM task_progress ${where} ORDER BY updated_at DESC`
       ).all(...binds) as TaskRow[]
+    },
+
+    pruneMemory(olderThanMs: number): number {
+      const cutoff = Date.now() - olderThanMs
+      const result = db.run("DELETE FROM memory WHERE created_at < ?", [cutoff])
+      return result.changes
     },
   }
 }
