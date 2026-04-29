@@ -1,0 +1,23 @@
+# Dependencies
+packages/*/node_modules/
+
+# Compiled output
+packages/*/dist/
+
+# Whisper model binaries (downloaded on first run, ~75–500 MB each)
+models/*.bin
+
+# Test scripts (temporary)
+packages/voice/*.mjs
+
+# Package lock (regenerate from package.json)
+package-lock.json
+
+# Editor / IDE
+.opencode/
+
+# Log files
+~/.opencode-voice.log
+
+# Database cache
+memory.db*
