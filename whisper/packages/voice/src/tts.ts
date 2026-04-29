@@ -271,9 +271,8 @@ export class KokoroTTSEngine implements TTSEngine {
   private async _ensureLoaded(): Promise<void> {
     if (this.modelLoaded) return;
     if (kokoroDisposed) {
-      throw new Error(
-        "Kokoro model has been disposed. Create a new engine instance instead.",
-      );
+      // Another call to dispose() is in progress; reset the flag and reload.
+      kokoroDisposed = false;
     }
     if (!kokoroLoading) {
       kokoroLoading = (async () => {
@@ -384,9 +383,8 @@ export class KokoroTTSEngine implements TTSEngine {
     // so long text gets silently cut off mid-sentence.  For text > 200 chars,
     // split into sentence-respecting chunks and generate each separately,
     // then concatenate the resulting WAV files.
-    const targetText = normalized.length > 200 ? normalized : normalized;
-    if (targetText.length > 200) {
-      const chunks = this._splitText(targetText);
+    if (normalized.length > 200) {
+      const chunks = this._splitText(normalized);
       const wavBuffers: Uint8Array[] = [];
 
       for (let i = 0; i < chunks.length; i++) {
@@ -483,7 +481,10 @@ export class KokoroTTSEngine implements TTSEngine {
       kokoroInstance = null;
     }
     kokoroLoading = null;
-    kokoroDisposed = true;
+    // Reset the disposed flag so a new KokoroTTSEngine instance can reload
+    // the model without throwing.  Each instance tracks its own modelLoaded
+    // state so re-entrant calls are safe.
+    kokoroDisposed = false;
     this.modelLoaded = false;
   }
 

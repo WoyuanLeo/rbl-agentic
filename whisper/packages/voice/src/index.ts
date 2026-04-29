@@ -157,42 +157,58 @@ export const VoicePlugin: Plugin = async (ctx: PluginInput, pluginConfig?: Recor
   }
 
   // -----------------------------------------------------------------------
-  // Voice input (STT via hotkey)
+  // Voice input (STT)
   // -----------------------------------------------------------------------
 
+  /** Maximum recording duration before force-stopping (ms). Prevents infinite hangs. */
+  const MAX_RECORD_MS = 30_000
+
   /**
-   * Run a voice recording session: start capture → VAD listens → silence → transcribe.
-   * Shows status to stderr so the user knows what's happening.
+   * Run one voice recording session:
+   *   start capture → VAD detects speech → silence timeout → transcribe → return text.
+   *
+   * Resolves with the transcribed string, or null if nothing was captured.
+   * Always resolves within MAX_RECORD_MS regardless of VAD state.
    */
   async function runVoiceCapture(): Promise<string | null> {
-    // Ensure STT engine is ready (loads model if needed)
+    // Ensure STT engine is ready (loads Whisper model on first call)
     await ensureSTTEngine()
 
-    // Configure VAD: trigger onSpeechEnd after silenceTimeout of silence
     const silenceTimeoutMs = config.silenceTimeout * 1000
+
+    let settled = false
     let resolve!: (result: string | null) => void
     const sessionPromise = new Promise<string | null>((r) => { resolve = r })
+
+    // Safety net: if VAD never fires (total silence, mic error, etc.) resolve
+    // after MAX_RECORD_MS so the tool call doesn't hang the LLM forever.
+    const safetyTimer = setTimeout(async () => {
+      if (settled) return
+      settled = true
+      log("[voice-plugin] safety timeout reached — stopping recording")
+      const audio = await capture.stop().catch(() => new Float32Array(0))
+      if (audio.length === 0) { resolve(null); return }
+      const hasContent = audio.some((v) => Math.abs(v) > 0.001)
+      if (!hasContent) { resolve(null); return }
+      const result = await sttEngine!.transcribe(audio).catch(() => null)
+      resolve(result ? result.text.trim() || null : null)
+    }, MAX_RECORD_MS)
 
     capture.setVADConfig(
       config.vadThreshold,
       async () => {
-        // VAD fired — recording is done (VAD called capture.stop() internally)
-        const audio = await capture.stop()
-        if (audio.length === 0) {
-          resolve(null)
-          return
-        }
+        if (settled) return
+        settled = true
+        clearTimeout(safetyTimer)
 
-        // Check if buffer is just silence (safety net)
+        const audio = await capture.stop().catch(() => new Float32Array(0))
+        if (audio.length === 0) { resolve(null); return }
+
         const hasContent = audio.some((v) => Math.abs(v) > 0.001)
-        if (!hasContent) {
-          resolve(null)
-          return
-        }
+        if (!hasContent) { resolve(null); return }
 
-        // Transcribe
-        const result = await sttEngine!.transcribe(audio)
-        resolve(result.text.trim() || null)
+        const result = await sttEngine!.transcribe(audio).catch(() => null)
+        resolve(result ? result.text.trim() || null : null)
       },
       silenceTimeoutMs,
     )
@@ -203,73 +219,54 @@ export const VoicePlugin: Plugin = async (ctx: PluginInput, pluginConfig?: Recor
     return sessionPromise
   }
 
-  /**
-  * Setup the hotkey listener.
-    *
-    * Ctrl+V (byte 0x14) starts a voice capture session. The session runs
-    * independently of stdin — VAD auto-stops the recording after silence.
-    *
-    * This only works when stdin is a TTY (interactive terminal).
-    * In headless/piped mode, voice input via hotkey is disabled.
-    */
-  function setupHotkey(): void {
+  // -----------------------------------------------------------------------
+  // SIGUSR1-based voice trigger
+  //
+  // Why not stdin raw-mode (Ctrl+V)?
+  //   OpenCode is a TUI application that owns stdin.  Calling
+  //   process.stdin.setRawMode(true) inside a plugin intercepts ALL input,
+  //   including keystrokes meant for the TUI — this hangs / corrupts the
+  //   terminal.
+  //
+  // How to trigger from a second terminal:
+  //   kill -USR1 $(pgrep -f opencode)
+  //
+  // Or add a shell alias:
+  //   alias voice='kill -USR1 $(pgrep -f opencode)'
+  //   then just type: voice
+  // -----------------------------------------------------------------------
+
+  function setupSignalTrigger(): void {
     if (!config.hotkeyEnabled) return
-    if (!process.stdin.isTTY) {
-      // Not interactive — hotkey requires a real terminal
-      return
-    }
-
-    // Parse the hotkey config to get the target byte
-    const hotkeyByte = parseHotkey(config.hotkey)
-    if (hotkeyByte === null) return
-
-    // Enable raw mode
-    process.stdin.setRawMode(true)
-    process.stdin.resume()
 
     let sessionActive = false
 
-    process.stdin.on("data", (raw: Buffer) => {
-      for (const byte of raw) {
-        if (byte === hotkeyByte && !sessionActive) {
-          sessionActive = true
-
-          // Show status and start the session
-          process.stderr.write(`\r🎤 Listening... (speak now)  \n`)
-
-          runVoiceCapture().then((text) => {
-            sessionActive = false
-
-            if (text && text.trim()) {
-              // Successful transcription
-              process.stderr.write(`\r📝 Transcribed: "${text}"\n\n`)
-            } else {
-              // No speech detected (or silence)
-              process.stderr.write(`\r⏹ No speech detected.\n\n`)
-            }
-          }).catch((err) => {
-            sessionActive = false
-            process.stderr.write(`\r❌ Voice capture failed: ${err instanceof Error ? err.message : String(err)}\n\n`)
-            log("[voice-plugin] voice capture error:", err)
-          })
-
-          break
-        }
+    process.on("SIGUSR1", () => {
+      if (sessionActive) {
+        log("[voice-plugin] SIGUSR1 received but session already active — ignoring")
+        return
       }
+
+      sessionActive = true
+      log("[voice-plugin] SIGUSR1 received — starting voice capture")
+
+      runVoiceCapture().then((text) => {
+        sessionActive = false
+        if (text && text.trim()) {
+          log("[voice-plugin] transcribed:", text)
+          console.log(`\n📝 Voice: "${text}"\n`)
+        } else {
+          log("[voice-plugin] no speech detected")
+        }
+      }).catch((err) => {
+        sessionActive = false
+        log("[voice-plugin] voice capture error:", err)
+        console.error("[voice-plugin] voice capture failed:", err instanceof Error ? err.message : String(err))
+      })
     })
-  }
 
-  /**
-   * Parse a hotkey string like "Ctrl+V" into the target byte.
-   * Supports: Ctrl+<letter>, Ctrl+<number>, Esc, and common combos.
-   */
-  function parseHotkey(hotkey: string): number | null {
-    const match = hotkey.match(/^Ctrl\+([A-Z0-9])$/i)
-    if (!match) return null
-
-    const char = match[1].toUpperCase()
-    // Ctrl+X = ASCII code for X minus 64 (e.g., Ctrl+V = 0x16 - 0x40 = 0x14)
-    return char.charCodeAt(0) - 64
+    log("[voice-plugin] SIGUSR1 trigger ready — activate with: kill -USR1", process.pid)
+    console.log(`[voice-plugin] 🎤 Voice input ready — trigger with: kill -USR1 ${process.pid}`)
   }
 
   // -----------------------------------------------------------------------
@@ -313,11 +310,49 @@ export const VoicePlugin: Plugin = async (ctx: PluginInput, pluginConfig?: Recor
     },
   })
 
- // -----------------------------------------------------------------------
-  // Initialize hotkey (runs after tool registration)
+  // -----------------------------------------------------------------------
+  // voice:record — LLM-callable tool that captures speech and returns text.
+  //
+  // This is the primary way to do STT inside OpenCode:
+  //   1. The user asks "transcribe what I say" or "listen"
+  //   2. The LLM calls voice:record
+  //   3. The plugin starts recording, VAD auto-stops on silence
+  //   4. Transcription is returned to the LLM as text
   // -----------------------------------------------------------------------
 
-  setupHotkey()
+  const recordTool = tool({
+    description:
+      "Record the user's voice and transcribe it to text using local Whisper STT. " +
+      "Call this tool whenever the user says: 'listen', 'record', 'I'll speak', " +
+      "'transcribe what I say', 'voice input', 'speak my question', or anything similar. " +
+      "The microphone opens immediately when this tool is called — tell the user to speak now. " +
+      "Recording stops automatically after silence is detected (about 1.5 s of quiet). " +
+      "Use the returned text as the user's next message and respond to it.",
+    args: {
+      prompt: tool.schema.string().optional().describe(
+        "Optional context hint to improve transcription accuracy (e.g. 'user is naming a file')",
+      ),
+    },
+    execute: async (_args: { prompt?: string }) => {
+      try {
+        const text = await runVoiceCapture()
+        if (!text || !text.trim()) {
+          return JSON.stringify({ status: "no_speech", text: "", message: "No speech detected." })
+        }
+        return JSON.stringify({ status: "ok", text, message: `Transcribed: "${text}"` })
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        log("[voice-plugin] voice:record error:", msg)
+        return JSON.stringify({ status: "error", text: "", message: msg })
+      }
+    },
+  })
+
+  // -----------------------------------------------------------------------
+  // Initialize signal trigger (safe — does not touch stdin)
+  // -----------------------------------------------------------------------
+
+  setupSignalTrigger()
 
   // -----------------------------------------------------------------------
   // Return plugin definition
@@ -330,6 +365,7 @@ export const VoicePlugin: Plugin = async (ctx: PluginInput, pluginConfig?: Recor
       "voice:read-aloud": readAloud,
       "voice:stop": stopTool,
       "voice:summarize": readAloud, // alias
+      "voice:record": recordTool,   // STT: record → transcribe → return text
 
       // User-facing tools
       "voice:speak": speak,

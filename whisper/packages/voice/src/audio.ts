@@ -126,6 +126,7 @@ export class AudioCapture {
 
     this.chunks = [];
     this.pcmBuffer = null;
+    this._pcmProcessed = false;  // reset for each new recording session
 
     const recorder = await detectRecorder();
 
@@ -187,21 +188,17 @@ export class AudioCapture {
 
     // Collect stdout chunks, with VAD processing
     this.process.stdout?.on("data", (chunk: Buffer) => {
-      this.chunks.push(Buffer.from(chunk));
+      const buf = Buffer.from(chunk);
+      this.chunks.push(buf);
 
-      // VAD: check amplitude every few chunks to keep it lightweight
-      // We process on a sample-rate-aligned boundary (1024 samples = 64ms at 16kHz)
-      const totalPCM = Buffer.concat(this.chunks);
-      const lastChunk = this.getLastSamplesAligned(totalPCM, 1024);
-      if (lastChunk) {
-        const float32 = pcmToFloat32(lastChunk);
-        const ended = this.processVADChunk(float32);
-        if (ended && this.vadOnSpeechEnd) {
-          // Silence timeout reached — stop recording immediately
-          this.stop().then(() => {
-            this.vadOnSpeechEnd?.();
-          });
-        }
+      // VAD: run amplitude check on the incoming chunk directly (O(1) per chunk).
+      // Align to a 1024-sample (64 ms at 16 kHz) boundary from the chunk tail.
+      const aligned = this.getLastSamplesAligned(buf, 1024);
+      if (aligned) {
+        const float32 = pcmToFloat32(aligned);
+        this.processVADChunk(float32);
+        // Note: processVADChunk fires vadOnSpeechEnd via its internal timer;
+        // no action needed here — the callback handles stop() itself.
       }
     });
 
@@ -414,8 +411,9 @@ export class AudioCapture {
       }, durationMs + 3000);
     });
 
-    // Return the recorded audio
-    return this.pcmBuffer ? pcmToFloat32(this.pcmBuffer) : new Float32Array(0);
+    // Return the recorded audio — delegate to stop() so WAV header stripping
+    // and Float32 conversion are applied consistently.
+    return this.stop();
   }
 
   /**
