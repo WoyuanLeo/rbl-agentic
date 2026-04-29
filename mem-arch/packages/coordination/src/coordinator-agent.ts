@@ -17,9 +17,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 export const coordinatorAgentConfig = {
   name: "coordinator",
   description:
-    "High-level agent that decomposes complex goals into focused tasks and coordinates sub-agents for parallel execution",
+    "Pure orchestrator: decomposes goals into sub-tasks and delegates to specialised agents. Never performs the work itself.",
   mode: "primary" as const,
-  steps: 20,
+  // 5 steps: assess → plan → spawn parallel → spawn sequential → report
+  // More steps = coordinator starts doing the work itself
+  steps: 5,
   options: {
     allowConcurrentTasks: true,
     maxParallelTasks: 5,
@@ -48,14 +50,24 @@ Provide your response as structured JSON with analysis, recommendations, tasks, 
 
 /**
  * Permission ruleset for the coordinator agent.
- * Grants access to memory query, task delegation, and essential tools.
+ *
+ * ONLY orchestration tools are granted — no doing-tools (read, search, bash).
+ * If the coordinator has read/search/bash, the LLM will use them directly
+ * instead of delegating, defeating the purpose of the orchestrator.
+ *
+ * Allowed:
+ *   task                  — spawn a sub-agent
+ *   global_memory_query   — check prior cross-session context
+ *   update_task_progress  — mark tasks in-progress / completed / failed
+ *   query_task_progress   — check what sub-agents have reported back
+ *
+ * Explicitly NOT granted: bash.execute, read, write, search, edit
  */
 export const coordinatorPermissions = {
-  global_memory_query: "allow",
   task: "allow",
-  "bash.execute": "allow",
-  read: "allow",
-  search: "allow",
+  global_memory_query: "allow",
+  update_task_progress: "allow",
+  query_task_progress: "allow",
 } as const
 
 /**

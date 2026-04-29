@@ -49,6 +49,29 @@ Two distinct SQL paths depending on whether a text search term is provided:
 
 ## 3. The Coordinator Agent (`@mem-arch/coordination`)
 
+### 3.0 Identity: Pure Orchestrator
+
+The coordinator **plans and delegates — it never performs the work itself.**
+
+| Config | Value | Why |
+|---|---|---|
+| `steps` | **5** | assess → plan → spawn parallel → spawn sequential → report; any more and it starts doing work itself |
+| `maxParallelTasks` | 5 | concurrent sub-agent cap |
+
+**Permissions — orchestration tools only. No doing-tools.**
+
+| Tool | Granted | Reason |
+|---|---|---|
+| `task` | ✅ | the only way to spawn sub-agents |
+| `global_memory_query` | ✅ | check prior cross-session context |
+| `update_task_progress` | ✅ | mark tasks in-progress / done |
+| `query_task_progress` | ✅ | check sub-agent reports |
+| `bash.execute` | ❌ | would let the coordinator do work itself |
+| `read` | ❌ | would let the coordinator read files directly |
+| `search` | ❌ | would let the coordinator bypass delegation |
+
+> When an LLM sees callable tools it uses them. Granting doing-tools is the primary cause of coordinators that "prefer to work on the task themselves."
+
 ### 3.1 Analysis Engine (`analyze.ts`)
 
 Two-phase hybrid:

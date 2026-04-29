@@ -117,7 +117,19 @@ Tracking implementation of the memory-driven orchestration system across 4 phase
 | Fix: naive keyword extraction in `filterContextForTask` | `packages/coordination/src/orchestrate.ts` | ✅ Fixed |
 | Add: bigram extraction + 50-word stopword list + early-exit | `packages/coordination/src/orchestrate.ts` | ✅ Added |
 
-### 5.5 Distribution
+### 5.7 Coordinator — Delegation Boundary
+
+| Task | File | Status |
+|---|---|---|
+| Fix: coordinator had `bash.execute`, `read`, `search` — causing it to work directly instead of delegating | `packages/coordination/src/coordinator-agent.ts` | ✅ Fixed |
+| Fix: `steps: 20` gave the coordinator an executor budget; reduced to 5 | `packages/coordination/src/coordinator-agent.ts` | ✅ Fixed |
+| Fix: system prompt had no explicit "do not do the work yourself" boundary | `packages/coordination/src/system-prompt.txt` | ✅ Fixed |
+| Fix: system prompt never showed how to invoke the `task` tool | `packages/coordination/src/system-prompt.txt` | ✅ Fixed |
+| Add: hard identity section ("YOU MUST NOT / YOU MUST ONLY") at top of prompt | `packages/coordination/src/system-prompt.txt` | ✅ Added |
+| Add: concrete `task` tool call examples with parallel-spawn pattern | `packages/coordination/src/system-prompt.txt` | ✅ Added |
+| Add: 5-step workflow with annotated example showing pure delegation | `packages/coordination/src/system-prompt.txt` | ✅ Added |
+
+---
 
 | Task | File | Status |
 |---|---|---|
@@ -144,8 +156,8 @@ Tracking implementation of the memory-driven orchestration system across 4 phase
 
 ## Summary
 
-- **Total Tasks:** 58
-- **Completed:** 57
+- **Total Tasks:** 65
+- **Completed:** 64
 - **Remaining:** 1 (core registry entry — separate PR)
 
 ## Build Status
