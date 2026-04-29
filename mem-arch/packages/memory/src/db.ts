@@ -112,7 +112,7 @@ export function openDatabase(projectDir: string): MemoryDB {
     queryMessages(params: QueryMessagesParams): MemoryRow[] {
       const limit = params.limit ?? 10
 
-      // Fast path: no full-text search needed — skip the FTS join entirely
+      // Fast path: no full-text search needed — skip FTS entirely
       if (!params.query) {
         const conditions: string[] = []
         const binds: (string | number)[] = []
@@ -123,19 +123,28 @@ export function openDatabase(projectDir: string): MemoryDB {
         return db.query(`SELECT * FROM memory ${where} ORDER BY ${orderBy} LIMIT ?`).all(...binds, limit) as MemoryRow[]
       }
 
-      // FTS path: full-text search with optional filters
-      const conditions: string[] = ["mf.content MATCH ?"]
+      // FTS path: isolate MATCH inside a subquery — SQLite FTS5 MATCH is incompatible
+      // with the INNER JOIN ... ON syntax and causes "near WHERE: syntax error".
+      // The subquery returns (rowid, rank) from FTS5; the outer query joins normally
+      // and applies any extra filters. FTS5 rank is negative BM25 — ASC = most relevant first.
       const binds: (string | number)[] = [params.query]
-      if (params.session_id) { conditions.push("m.session_id = ?"); binds.push(params.session_id) }
-      if (params.role) { conditions.push("m.role = ?"); binds.push(params.role) }
+      const outerConditions: string[] = []
+      if (params.session_id) { outerConditions.push("m.session_id = ?"); binds.push(params.session_id) }
+      if (params.role) { outerConditions.push("m.role = ?"); binds.push(params.role) }
+      binds.push(limit)
 
-      let orderBy = "bm25(memory_fts) ASC"
+      const outerWhere = outerConditions.length ? `WHERE ${outerConditions.join(" AND ")}` : ""
+      let orderBy = "fts.rank ASC"  // FTS5 rank: most negative = most relevant
       if (params.rank_by === "newest") orderBy = "m.created_at DESC"
       if (params.rank_by === "oldest") orderBy = "m.created_at ASC"
 
-      const where = `WHERE ${conditions.join(" AND ")}`
-      const sql = `SELECT m.* FROM memory m INNER JOIN memory_fts mf ON m.id = mf.rowid ${where} ORDER BY ${orderBy} LIMIT ?`
-      return db.query(sql).all(...binds, limit) as MemoryRow[]
+      const sql = `
+        SELECT m.* FROM memory m
+        JOIN (SELECT rowid, rank FROM memory_fts WHERE memory_fts MATCH ?) fts ON m.id = fts.rowid
+        ${outerWhere}
+        ORDER BY ${orderBy}
+        LIMIT ?`
+      return db.query(sql).all(...binds) as MemoryRow[]
     },
 
     getMemoryCount(): number {
