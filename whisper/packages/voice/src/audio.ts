@@ -2,6 +2,8 @@ import { spawn } from "node:child_process";
 import { mkdtemp, unlink, rmdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { VoicePluginConfig } from "./config.js";
+import { defaultConfig } from "./config.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -111,6 +113,16 @@ export class AudioCapture {
   private vadThreshold: number = 0.03;
   private vadTimeoutMs: number = 1500;
 
+  private config: VoicePluginConfig;
+
+  /**
+   * Create an AudioCapture instance.
+   * @param config Optional voice plugin config (for device index etc.).
+   */
+  constructor(config?: Partial<VoicePluginConfig>) {
+    this.config = { ...defaultConfig, ...config };
+  }
+
   /**
    * Start recording from the system microphone.
    *
@@ -149,9 +161,10 @@ export class AudioCapture {
       const platform = process.platform;
       if (platform === "darwin") {
         // macOS: use avfoundation for audio capture
+        const deviceIndex = this.config.audioDeviceIndex || "0";
         args = [
           "-f", "avfoundation",
-          "-i", ":0",
+          "-i", deviceIndex,
           "-ar", "16000",
           "-ac", "1",
           "-f", "s16le",
@@ -173,12 +186,22 @@ export class AudioCapture {
 
     this.started = true;
 
+    // Validate that the recording device is actually producing audio data
+    setTimeout(() => {
+      if (this.started && this.chunks.length === 0) {
+        console.error("[voice-plugin] No audio data received from recording device within 2 seconds. Check microphone permissions and device availability.");
+      }
+    }, 2000);
+
     this.process.stdout?.on("error", () => {
       // stdout error; the 'close' event will handle cleanup
     });
 
-    this.process.stderr?.on("data", () => {
-      // ffmpeg writes progress/status to stderr; silently discard.
+    this.process.stderr?.on("data", (data) => {
+      const msg = data.toString().trim();
+      if (msg) {
+        console.log("[voice-plugin] ffmpeg stderr:", msg);
+      }
     });
 
     this.process.on("error", (err) => {

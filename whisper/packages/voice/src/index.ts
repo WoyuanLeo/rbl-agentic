@@ -53,7 +53,7 @@ export const VoicePlugin: Plugin = async (ctx: PluginInput, pluginConfig?: Recor
   // --- State ---
 
   // Audio subsystem
-  const capture = new AudioCapture()
+  const capture = new AudioCapture(rawConfig)
   const player = new AudioPlayer()
 
   // STT subsystem — single persistent engine, model loaded once

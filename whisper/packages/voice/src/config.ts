@@ -12,6 +12,9 @@ export interface VoicePluginConfig {
   // Use `kill -USR1 <pid>` or the voice:record tool instead.
   silenceTimeout: number;     // seconds of silence to end recording (default: 1.5)
   vadThreshold: number;       // amplitude threshold for speech detection (default: 0.03)
+
+  // --- Audio device ---
+  audioDeviceIndex?: string;  // avfoundation device index for ffmpeg (default: "0")
 }
 
 export const defaultConfig: VoicePluginConfig = {
@@ -25,4 +28,5 @@ export const defaultConfig: VoicePluginConfig = {
   hotkeyEnabled: true,
   silenceTimeout: 1.5,
   vadThreshold: 0.03,
+  audioDeviceIndex: "0",
 };

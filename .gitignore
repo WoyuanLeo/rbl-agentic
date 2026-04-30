@@ -22,3 +22,14 @@ package-lock.json
 # opencode local runtime data (any depth)
 **/.opencode/
 **/opencode/agent/
+
+# Downloaded model files
+**/*.bin
+**/models/
+
+# Whisper / voice temp files
+whisper/packages/voice/debug_test.mjs
+whisper/packages/voice/test_ffmpeg.mjs
+whisper/packages/voice/test_recording.mjs
+*.wav
+
