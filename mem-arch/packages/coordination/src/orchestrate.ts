@@ -136,10 +136,17 @@ export function decomposeGoal(goal: string, opts: DecomposeOptions = {}): Orches
   }
 }
 
+export interface ExecutePlanOptions {
+  /** Max concurrent tasks per subagent type. Defaults to 1. */
+  maxConcurrencyPerAgent?: number
+}
+
 export function executePlan(
   plan: OrchestrationPlan,
   executeSubAgent: (task: Task) => Promise<TaskResult>,
+  opts: ExecutePlanOptions = {},
 ): Effect.Effect<TaskResult[], Error, Scope.Scope> {
+  const maxConcurrency = opts.maxConcurrencyPerAgent ?? 1
   return Effect.gen(function* () {
     const scope = yield* Effect.scope
     const results: TaskResult[] = []
@@ -168,7 +175,7 @@ export function executePlan(
             scope,
           ),
         ),
-        { concurrency: "unbounded" },
+        { concurrency: maxConcurrency },
       )
 
       const groupResults = yield* Effect.all(
@@ -183,7 +190,7 @@ export function executePlan(
             ),
           ),
         ),
-        { concurrency: "unbounded" },
+        { concurrency: maxConcurrency },
       )
 
       for (const result of groupResults) {

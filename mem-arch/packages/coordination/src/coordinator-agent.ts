@@ -25,6 +25,7 @@ export const coordinatorAgentConfig = {
   options: {
     allowConcurrentTasks: true,
     maxParallelTasks: 5,
+    maxConcurrencyPerAgent: 1,
   },
 } as const
 
