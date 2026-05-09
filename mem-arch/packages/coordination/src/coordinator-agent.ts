@@ -44,6 +44,9 @@ Available sub-agents: explore, general, code-reviewer, principal-engineer, quali
 For each complex goal, break it into:
 1. Parallel groups (independent tasks, same agent) for concurrent execution
 2. Sequential tasks (with dependencies) that must run in order
+3. Mandatory pre-closure code-reviewer check for progress + implementation quality
+
+Do not declare completion when review gaps exist. Revisit gaps first.
 
 Provide your response as structured JSON with analysis, recommendations, tasks, and parallel_groups.`
   }
