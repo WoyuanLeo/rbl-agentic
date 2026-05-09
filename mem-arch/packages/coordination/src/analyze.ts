@@ -26,6 +26,12 @@ export const INJECT_CONFIDENCE_THRESHOLD = 0.5
 export const LLM_FALLBACK_THRESHOLD = 0.5
 
 /**
+ * How long a task must have no updates before it is considered stalled (ms).
+ * Override via the `staleTaskThresholdMs` parameter in `analyze()`.
+ */
+export const DEFAULT_STALE_TASK_THRESHOLD_MS = 300_000 // 5 minutes
+
+/**
  * Callback type for invoking the coordinator LLM agent.
  * Provided by the caller (plugin layer) so this module stays framework-agnostic.
  *
@@ -89,7 +95,7 @@ function parseLLMResponse(raw: string): AnalysisResult | null {
   }
 }
 
-export function analyze(db: MemoryDB): string {
+export function analyze(db: MemoryDB, staleTaskThresholdMs: number = DEFAULT_STALE_TASK_THRESHOLD_MS): string {
   const recentHistory = db.queryMessages({ limit: 20, rank_by: "newest" })
   const activeTasks = db.queryTasks({ status: "in_progress" })
   const completedTasks = db.queryTasks({ status: "completed" })
@@ -98,11 +104,12 @@ export function analyze(db: MemoryDB): string {
   const tasks: AnalysisResult["tasks"] = []
   let confidence = 0.1 // baseline: low
 
-  const stalledTasks = activeTasks.filter((t: TaskRow) => Date.now() - t.updated_at > 300_000)
+  const stalledTasks = activeTasks.filter((t: TaskRow) => Date.now() - t.updated_at > staleTaskThresholdMs)
   if (stalledTasks.length > 0) {
     confidence += 0.3
+    const thresholdMin = Math.round(staleTaskThresholdMs / 60_000)
     recommendations.push(
-      `⚠️ ${stalledTasks.length} task(s) appear stalled (no updates in 5+ min): ` +
+      `⚠️ ${stalledTasks.length} task(s) appear stalled (no updates in ${thresholdMin}+ min): ` +
       stalledTasks.map((t: TaskRow) => t.task_id).join(", ") +
       ". Consider reassigning or providing clarification."
     )
@@ -178,18 +185,28 @@ export function analyze(db: MemoryDB): string {
     tasks: tasks.length > 0 ? tasks : undefined,
   }
 
-  // Build parallel groups: tasks with no dependencies sharing the same agent
+  // Build parallel groups: independent tasks (no deps) grouped by agent;
+  // cross-agent independent tasks also get a "parallel" sentinel group
   if (tasks.length > 0) {
     const agentGroups: Record<string, string[]> = {}
+    const crossAgentIds: string[] = []
+    const seenAgents = new Set<string>()
     for (const task of tasks) {
       if (task.depends_on.length === 0) {
         if (!agentGroups[task.agent]) agentGroups[task.agent] = []
-        agentGroups[task.agent].push(task.id)
+        agentGroups[task.agent]!.push(task.id)
+        crossAgentIds.push(task.id)
+        seenAgents.add(task.agent)
       }
     }
-    const groups = Object.entries(agentGroups)
-      .filter(([, ids]) => ids.length > 1)
-      .map(([agent, task_ids]) => ({ agent, task_ids }))
+    const groups: AnalysisResult["parallel_groups"] = []
+    for (const [agent, task_ids] of Object.entries(agentGroups)) {
+      if (task_ids.length > 1) groups.push({ agent, task_ids })
+    }
+    // If tasks span multiple agents with no same-agent pairs, add a cross-agent parallel group
+    if (groups.length === 0 && seenAgents.size > 1 && crossAgentIds.length > 1) {
+      groups.push({ agent: "parallel", task_ids: crossAgentIds })
+    }
     if (groups.length > 0) result.parallel_groups = groups
   }
 

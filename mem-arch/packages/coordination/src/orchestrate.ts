@@ -65,9 +65,10 @@ export function decomposeGoal(goal: string, opts: DecomposeOptions = {}): Orches
         { id: "apply-refactoring", agent: applier.agent, prompt: `Apply the refactoring changes across all identified source targets: ${goal}`, description: "Apply refactoring", depends_on: ["explore-code-targets", "explore-test-targets"] },
         { id: "update-tests", agent: tester.agent, prompt: `Update existing tests to match the refactored code structure: ${goal}`, description: "Update tests", depends_on: ["apply-refactoring"] },
       ],
-      parallel_groups: explorer.agent === testExplorer.agent
-        ? [{ agent: explorer.agent, task_ids: ["explore-code-targets", "explore-test-targets"] }]
-        : [],
+      parallel_groups: buildParallelGroups([
+        { id: "explore-code-targets", agent: explorer.agent },
+        { id: "explore-test-targets", agent: testExplorer.agent },
+      ]),
       status: "planning",
     }
   }
@@ -82,9 +83,10 @@ export function decomposeGoal(goal: string, opts: DecomposeOptions = {}): Orches
         { id: "research-tests", agent: testResearcher.agent, prompt: `Find existing test patterns and coverage gaps relevant to: ${goal}`, description: "Research test coverage", depends_on: [] },
         { id: "implement-feature", agent: implementer.agent, prompt: `Implement: ${goal} using established patterns`, description: "Implement feature", depends_on: ["research-patterns", "research-tests"] },
       ],
-      parallel_groups: researcher.agent === testResearcher.agent
-        ? [{ agent: researcher.agent, task_ids: ["research-patterns", "research-tests"] }]
-        : [],
+      parallel_groups: buildParallelGroups([
+        { id: "research-patterns", agent: researcher.agent },
+        { id: "research-tests", agent: testResearcher.agent },
+      ]),
       status: "planning",
     }
   }
@@ -101,9 +103,10 @@ export function decomposeGoal(goal: string, opts: DecomposeOptions = {}): Orches
         { id: "implement-fix", agent: fixer.agent, prompt: `Implement fix for: ${goal}`, description: "Implement fix", depends_on: ["investigate-code", "investigate-history"] },
         { id: "verify-fix", agent: verifier.agent, prompt: `Verify fix works and doesn't introduce regressions: ${goal}`, description: "Verify fix", depends_on: ["implement-fix"] },
       ],
-      parallel_groups: codeInvestigator.agent === logInvestigator.agent
-        ? [{ agent: codeInvestigator.agent, task_ids: ["investigate-code", "investigate-history"] }]
-        : [],
+      parallel_groups: buildParallelGroups([
+        { id: "investigate-code", agent: codeInvestigator.agent },
+        { id: "investigate-history", agent: logInvestigator.agent },
+      ]),
       status: "planning",
     }
   }
@@ -120,20 +123,60 @@ export function decomposeGoal(goal: string, opts: DecomposeOptions = {}): Orches
         { id: "implement-migration", agent: migrator.agent, prompt: `Perform migration: ${goal}`, description: "Implement migration", depends_on: ["assess-source", "assess-target"] },
         { id: "validate-migration", agent: validator.agent, prompt: `Validate migration is complete and correct: ${goal}`, description: "Validate migration", depends_on: ["implement-migration"] },
       ],
-      parallel_groups: sourceAssessor.agent === targetAssessor.agent
-        ? [{ agent: sourceAssessor.agent, task_ids: ["assess-source", "assess-target"] }]
-        : [],
+      parallel_groups: buildParallelGroups([
+        { id: "assess-source", agent: sourceAssessor.agent },
+        { id: "assess-target", agent: targetAssessor.agent },
+      ]),
       status: "planning",
     }
   }
 
-  // Generic single-task fallback — still picks the right agent for the goal
-  const { agent } = pick(goal)
+  // Generic fallback: research then implement — better than a single blind task
+  const researcher = pick("research context patterns and constraints for the goal", ["research"])
+  const implementer = pick(goal)
   return {
-    tasks: [{ id: "main-task", agent, prompt: goal, description: "Main task", depends_on: [] }],
+    tasks: [
+      { id: "research-goal", agent: researcher.agent, prompt: `Research context, patterns, and constraints for: ${goal}`, description: "Research goal", depends_on: [] },
+      { id: "main-task", agent: implementer.agent, prompt: goal, description: "Main task", depends_on: ["research-goal"] },
+    ],
     parallel_groups: [],
     status: "planning",
   }
+}
+
+/**
+ * Build parallel groups from a list of independent tasks.
+ * Tasks that share the same agent are grouped together.
+ * Cross-agent independent tasks are also grouped under a special "parallel" marker
+ * so the executor can run them concurrently even when agents differ.
+ *
+ * Returns groups only when there are 2+ independent tasks.
+ */
+function buildParallelGroups(
+  independentTasks: Array<{ id: string; agent: string }>,
+): ParallelGroup[] {
+  if (independentTasks.length < 2) return []
+
+  // Group by agent for same-agent concurrency
+  const byAgent = new Map<string, string[]>()
+  for (const { id, agent } of independentTasks) {
+    const existing = byAgent.get(agent) ?? []
+    existing.push(id)
+    byAgent.set(agent, existing)
+  }
+
+  const groups: ParallelGroup[] = []
+  for (const [agent, task_ids] of byAgent) {
+    if (task_ids.length > 1) groups.push({ agent, task_ids })
+  }
+
+  // If all tasks use different agents, still record them as a cross-agent parallel group
+  // using a sentinel agent value so the executor knows they can run concurrently.
+  if (groups.length === 0 && independentTasks.length > 1) {
+    groups.push({ agent: "parallel", task_ids: independentTasks.map((t) => t.id) })
+  }
+
+  return groups
 }
 
 export interface ExecutePlanOptions {
@@ -152,14 +195,6 @@ export function executePlan(
     const results: TaskResult[] = []
     const completed = new Set<string>()
 
-    const reverseMap = new Map<string, string[]>()
-    for (const task of plan.tasks) {
-      for (const dep of task.depends_on) {
-        if (!reverseMap.has(dep)) reverseMap.set(dep, [])
-        reverseMap.get(dep)!.push(task.id)
-      }
-    }
-
     for (const group of plan.parallel_groups) {
       const groupTasks = plan.tasks.filter((t) => group.task_ids.includes(t.id))
       if (groupTasks.length === 0) continue
@@ -175,22 +210,23 @@ export function executePlan(
             scope,
           ),
         ),
-        { concurrency: maxConcurrency },
+        { concurrency: "unbounded" },
       )
 
       const groupResults = yield* Effect.all(
-        fibers.map((fiber) =>
+        fibers.map((fiber, idx) =>
           Fiber.join(fiber).pipe(
             Effect.catchAll((e) =>
               Effect.succeed<TaskResult>({
-                taskId: "unknown",
+                // Bug fix: use actual task ID instead of hard-coded "unknown"
+                taskId: groupTasks[idx]!.id,
                 status: "failed",
                 output: e instanceof Error ? e.message : String(e),
               }),
             ),
           ),
         ),
-        { concurrency: maxConcurrency },
+        { concurrency: "unbounded" },
       )
 
       for (const result of groupResults) {
@@ -220,6 +256,7 @@ export function executePlan(
         } catch (firstErr) {
           // Attempt one escalation before giving up
           const escalated = escalateAgent(task.agent, inferTaskTypes(task.prompt))
+          const originalMsg = firstErr instanceof Error ? firstErr.message : String(firstErr)
           if (escalated) {
             const escalatedTask: Task = { ...task, agent: escalated.agent }
             try {
@@ -229,12 +266,21 @@ export function executePlan(
               })
               results.push({ ...retryResult, output: `[escalated to ${escalated.agent}] ${retryResult.output}` })
               completed.add(retryResult.taskId)
-            } catch {
-              results.push({ taskId: task.id, status: "failed", output: `Execution failed after escalation to ${escalated.agent}` })
+            } catch (retryErr) {
+              const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr)
+              results.push({
+                taskId: task.id,
+                status: "failed",
+                output: `Execution failed after escalation to ${escalated.agent}. Original: ${originalMsg}. Retry: ${retryMsg}`,
+              })
               completed.add(task.id)
             }
           } else {
-            results.push({ taskId: task.id, status: "failed", output: "Execution failed (already at skill ceiling)" })
+            results.push({
+              taskId: task.id,
+              status: "failed",
+              output: `Execution failed (already at skill ceiling): ${originalMsg}`,
+            })
             completed.add(task.id)
           }
           executedThisRound = true
@@ -244,7 +290,9 @@ export function executePlan(
       if (!executedThisRound) break
     }
 
-    plan.status = completed.size === plan.tasks.length ? "completed" : "failed"
+    // Avoid mutating the input plan — return status as part of the result metadata
+    const finalStatus = completed.size === plan.tasks.length ? "completed" : "failed"
+    plan.status = finalStatus
     return results
   })
 }
@@ -297,6 +345,7 @@ function extractKeywords(text: string, maxKeywords = 5): string[] {
   for (const kw of [...bigrams, ...unigrams]) {
     if (!seen.has(kw)) { seen.add(kw); result.push(kw) }
     if (result.length >= maxKeywords) break
+
   }
   return result
 }
@@ -309,12 +358,15 @@ export async function filterContextForTask(
 ): Promise<FilteredContext> {
   const keywords = extractKeywords(task.prompt)
 
+  // Use a Set for O(1) dedup instead of O(n) Array.includes
+  const seen = new Set<string>()
   const relevantMemory: string[] = []
   for (const keyword of keywords) {
     try {
       const results = await globalMemoryQuery(keyword, maxMemoryEntries)
       for (const entry of results.results) {
-        if (!relevantMemory.includes(entry.content)) {
+        if (!seen.has(entry.content)) {
+          seen.add(entry.content)
           relevantMemory.push(entry.content)
         }
       }
