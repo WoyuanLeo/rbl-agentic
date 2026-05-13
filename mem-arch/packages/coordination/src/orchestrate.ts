@@ -40,6 +40,8 @@ export interface DecomposeOptions {
   budgetCap?: CostTier
   /** Override complexity instead of inferring from text. */
   complexity?: TaskComplexity
+  /** Agent to use for pre-closure review. Defaults to "code-reviewer". */
+  reviewAgent?: string
 }
 
 export function decomposeGoal(goal: string, opts: DecomposeOptions = {}): OrchestrationPlan {
@@ -64,6 +66,7 @@ export function decomposeGoal(goal: string, opts: DecomposeOptions = {}): Orches
         { id: "explore-test-targets", agent: testExplorer.agent, prompt: `Identify all test files and fixtures affected by this refactoring: ${goal}`, description: "Explore test targets", depends_on: [] },
         { id: "apply-refactoring", agent: applier.agent, prompt: `Apply the refactoring changes across all identified source targets: ${goal}`, description: "Apply refactoring", depends_on: ["explore-code-targets", "explore-test-targets"] },
         { id: "update-tests", agent: tester.agent, prompt: `Update existing tests to match the refactored code structure: ${goal}`, description: "Update tests", depends_on: ["apply-refactoring"] },
+        { id: "pre-closure-review", agent: opts.reviewAgent ?? "code-reviewer", prompt: `Review implementation completeness and quality for: ${goal}. Report: what is done, what gaps remain, what must be revisited.`, description: "Pre-closure review", depends_on: ["update-tests"] },
       ],
       parallel_groups: buildParallelGroups([
         { id: "explore-code-targets", agent: explorer.agent },
@@ -82,6 +85,7 @@ export function decomposeGoal(goal: string, opts: DecomposeOptions = {}): Orches
         { id: "research-patterns", agent: researcher.agent, prompt: `Research existing patterns, dependencies, and conventions for: ${goal}`, description: "Research patterns", depends_on: [] },
         { id: "research-tests", agent: testResearcher.agent, prompt: `Find existing test patterns and coverage gaps relevant to: ${goal}`, description: "Research test coverage", depends_on: [] },
         { id: "implement-feature", agent: implementer.agent, prompt: `Implement: ${goal} using established patterns`, description: "Implement feature", depends_on: ["research-patterns", "research-tests"] },
+        { id: "pre-closure-review", agent: opts.reviewAgent ?? "code-reviewer", prompt: `Review implementation completeness and quality for: ${goal}. Report: what is done, what gaps remain, what must be revisited.`, description: "Pre-closure review", depends_on: ["implement-feature"] },
       ],
       parallel_groups: buildParallelGroups([
         { id: "research-patterns", agent: researcher.agent },
@@ -102,6 +106,7 @@ export function decomposeGoal(goal: string, opts: DecomposeOptions = {}): Orches
         { id: "investigate-history", agent: logInvestigator.agent, prompt: `Check recent git history, logs, and test output for clues about: ${goal}`, description: "Check history & logs", depends_on: [] },
         { id: "implement-fix", agent: fixer.agent, prompt: `Implement fix for: ${goal}`, description: "Implement fix", depends_on: ["investigate-code", "investigate-history"] },
         { id: "verify-fix", agent: verifier.agent, prompt: `Verify fix works and doesn't introduce regressions: ${goal}`, description: "Verify fix", depends_on: ["implement-fix"] },
+        { id: "pre-closure-review", agent: opts.reviewAgent ?? "code-reviewer", prompt: `Review fix completeness and quality for: ${goal}. Report: what is done, what gaps remain, what must be revisited.`, description: "Pre-closure review", depends_on: ["verify-fix"] },
       ],
       parallel_groups: buildParallelGroups([
         { id: "investigate-code", agent: codeInvestigator.agent },
@@ -122,6 +127,7 @@ export function decomposeGoal(goal: string, opts: DecomposeOptions = {}): Orches
         { id: "assess-target", agent: targetAssessor.agent, prompt: `Assess the target environment and migration constraints: ${goal}`, description: "Assess target", depends_on: [] },
         { id: "implement-migration", agent: migrator.agent, prompt: `Perform migration: ${goal}`, description: "Implement migration", depends_on: ["assess-source", "assess-target"] },
         { id: "validate-migration", agent: validator.agent, prompt: `Validate migration is complete and correct: ${goal}`, description: "Validate migration", depends_on: ["implement-migration"] },
+        { id: "pre-closure-review", agent: opts.reviewAgent ?? "code-reviewer", prompt: `Review migration completeness and quality for: ${goal}. Report: what is done, what gaps remain, what must be revisited.`, description: "Pre-closure review", depends_on: ["validate-migration"] },
       ],
       parallel_groups: buildParallelGroups([
         { id: "assess-source", agent: sourceAssessor.agent },
@@ -138,6 +144,7 @@ export function decomposeGoal(goal: string, opts: DecomposeOptions = {}): Orches
     tasks: [
       { id: "research-goal", agent: researcher.agent, prompt: `Research context, patterns, and constraints for: ${goal}`, description: "Research goal", depends_on: [] },
       { id: "main-task", agent: implementer.agent, prompt: goal, description: "Main task", depends_on: ["research-goal"] },
+      { id: "pre-closure-review", agent: opts.reviewAgent ?? "code-reviewer", prompt: `Review implementation completeness and quality for: ${goal}. Report: what is done, what gaps remain, what must be revisited.`, description: "Pre-closure review", depends_on: ["main-task"] },
     ],
     parallel_groups: [],
     status: "planning",
@@ -288,6 +295,21 @@ export function executePlan(
       }
 
       if (!executedThisRound) break
+    }
+
+    // Review gate enforcement: check if the pre-closure review flagged gaps
+    const reviewResult = results.find((r) => r.taskId === "pre-closure-review")
+    if (reviewResult && reviewResult.status === "completed") {
+      const reviewText = reviewResult.output.toLowerCase()
+      const hasGaps = /gap|remain|miss|todo|revisit|not done|still needs|incomplete/.test(reviewText)
+      if (hasGaps) {
+        results.push({
+          taskId: "review-gate-failed",
+          status: "failed",
+          output: `REVIEW_GATE_BLOCKED: The pre-closure review identified gaps that must be revisited before the goal can be considered complete. Coordinator must spawn follow-up tasks.`,
+        })
+        plan.status = "failed"  // Mark as failed so the coordinator knows it wasn't accepted
+      }
     }
 
     // Avoid mutating the input plan — return status as part of the result metadata

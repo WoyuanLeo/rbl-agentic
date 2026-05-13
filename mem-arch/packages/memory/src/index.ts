@@ -1,3 +1,11 @@
+console.error("[PLUGIN] Module path:", import.meta.url)
+
+import { writeLog } from "./writeLog.js"
+
+writeLog("[PLUGIN] Module path: " + import.meta.url)
+
+writeLog('[MEMORY PLUGIN LOADED] src/index.ts version with try/catch')
+
 import type { Plugin, PluginInput, Hooks } from "@opencode-ai/plugin"
 import { tool } from "@opencode-ai/plugin/tool"
 import { openDatabase, type MemoryDB } from "./db.js"
@@ -12,6 +20,17 @@ function extractContent(parts: unknown[]): string {
       return `[Tool Result: ${p.tool?.name ?? "unknown"}]`
     })
     .join("\n")
+}
+
+function extractQueryContent(query: unknown): string {
+  if (typeof query === "string") return query
+  if (Array.isArray(query)) {
+    return query
+      .filter((p: any) => p.type === "text")
+      .map((p: any) => p.text)
+      .join(" ")
+  }
+  return String(query ?? "")
 }
 
 export const MemoryPlugin: Plugin = async (ctx: PluginInput) => {
@@ -59,45 +78,67 @@ export const MemoryPlugin: Plugin = async (ctx: PluginInput) => {
   }
 
   return {
-    global_memory_query: tool({
-      description: "Query the global memory across all sessions with keyword and semantic search",
-      args: {
-        query: tool.schema.string().describe("Search query to match against message content (supports FTS5 syntax)"),
-        limit: tool.schema.number().describe("Maximum number of results to return").default(10),
-        session_id: tool.schema.string().describe("Filter by session ID (optional)").optional(),
-        role: tool.schema.enum(["user", "assistant"]).describe("Filter by role (optional)").optional(),
-        rank_by: tool.schema.enum(["relevance", "newest", "oldest"]).describe("Rank results by relevance, newest first, or oldest first").default("relevance"),
-      },
-      execute: async (args, _ctx) => {
-        const results = db.queryMessages(args)
-        return JSON.stringify({ results, count: results.length, rank_by: args.rank_by })
-      },
-    }),
-
-    update_task_progress: tool({
-      description: "Update the progress/status of a sub-agent task",
-      args: {
-        task_id: tool.schema.string().describe("Unique identifier for the task"),
-        status: tool.schema.enum(["pending", "in_progress", "completed", "failed"]).describe("Current status of the task"),
-        result: tool.schema.unknown().describe("Result data (optional)").optional(),
-      },
-      execute: async (args, _ctx) => {
-        db.upsertTask({ task_id: args.task_id, status: args.status, result: args.result, updated_at: Date.now() })
-        return JSON.stringify({ success: true, task_id: args.task_id, status: args.status })
-      },
-    }),
-
-    query_task_progress: tool({
-      description: "Query the progress of sub-agent tasks",
-      args: {
-        task_id: tool.schema.string().describe("Specific task ID (optional)").optional(),
-        status: tool.schema.enum(["pending", "in_progress", "completed", "failed"]).describe("Filter by status (optional)").optional(),
-      },
-      execute: async (args, _ctx) => {
-        const results = db.queryTasks(args)
-        return JSON.stringify({ results, count: results.length })
-      },
-    }),
+    tool: {
+      global_memory_query: ((): any => {
+        try {
+          writeLog("[TOOL] Defining global_memory_query tool")
+          return tool({
+            description: "Query the global memory across all sessions with keyword and semantic search",
+            args: {
+              query: tool.schema.string().describe("Search query to match against message content (supports FTS5 syntax)"),
+              limit: tool.schema.number().describe("Maximum number of results to return").default(10),
+              session_id: tool.schema.string().describe("Filter by session ID (optional)").optional(),
+              role: tool.schema.enum(["user", "assistant"]).describe("Filter by role (optional)").optional(),
+              rank_by: tool.schema.enum(["relevance", "newest", "oldest"]).describe("Rank results by relevance, newest first, or oldest first").default("relevance"),
+            },
+            execute: async (args: any, _ctx: any) => {
+            try {
+                const rawQuery = extractQueryContent(args.query);
+                const typedArgs = { ...args, query: rawQuery || undefined };
+                const results = db.queryMessages(typedArgs);
+                return JSON.stringify({ results, count: results.length, rank_by: typedArgs.rank_by });
+            } catch (err: unknown) {
+                const e = err as Error;
+                return JSON.stringify({
+                    error: e.message,
+                    stack: e.stack,
+                    args: JSON.stringify(args)
+                });
+            }
+            },
+          })
+        } catch (e) {
+          writeLog(`[TOOL] Schema definition error: ${e}`)
+          return null
+        }
+      })(),
+  
+      update_task_progress: tool({
+        description: "Update the progress/status of a sub-agent task",
+        args: {
+          task_id: tool.schema.string().describe("Unique identifier for the task"),
+          status: tool.schema.enum(["pending", "in_progress", "completed", "failed"]).describe("Current status of the task"),
+          result: tool.schema.string().describe("Result data (optional)").optional(),
+        },
+        execute: async (args, _ctx) => {
+          db.upsertTask({ task_id: args.task_id, status: args.status, result: args.result, updated_at: Date.now() })
+          return JSON.stringify({ success: true, task_id: args.task_id, status: args.status })
+        },
+      }),
+  
+      query_task_progress: tool({
+        description: "Query the progress of sub-agent tasks",
+        args: {
+          task_id: tool.schema.string().describe("Specific task ID (optional)").optional(),
+          status: tool.schema.enum(["pending", "in_progress", "completed", "failed"]).describe("Filter by status (optional)").optional(),
+        },
+        execute: async (args, _ctx) => {
+          writeLog(`[query_task_progress] RAW ARGS from LLM: ${JSON.stringify(args, null, 2)}`)
+          const results = db.queryTasks(args)
+          return JSON.stringify({ results, count: results.length })
+        },
+      }),
+    },
 
     "chat.message": async (
       input: { sessionID: string; agent?: string; model?: { providerID: string; modelID: string }; messageID?: string; variant?: string },
@@ -156,10 +197,27 @@ export const MemoryPlugin: Plugin = async (ctx: PluginInput) => {
       }
     },
 
+    "tool.execute.before": async (
+      input: { tool: string; sessionID: string; callID: string },
+      output: { args: any },
+    ): Promise<void> => {
+      if (input.tool === "global_memory_query") {
+        writeLog(`[BEFORE EXEC] tool=${input.tool}, args=${JSON.stringify(output.args)}`)
+        writeLog(`[BEFORE EXEC] args keys: ${output.args ? Object.keys(output.args).join(", ") : "none"}`)
+        writeLog(`[BEFORE EXEC] args.query type: ${typeof output.args?.query}`)
+        writeLog(`[BEFORE EXEC] args.query value: ${JSON.stringify(output.args?.query)}`)
+      }
+    },
+
     "tool.execute.after": async (
       input: { tool: string; args?: Record<string, unknown>; callID?: string },
       _output: unknown,
     ): Promise<void> => {
+      // Debug: log global_memory_query calls
+      if (input.tool === "global_memory_query") {
+        writeLog(`[DEBUG] global_memory_query called with args: ${JSON.stringify(input.args)}`)
+      }
+
       if (input.tool !== "task" || !input.args?.subagent_type) return
 
       const taskId = input.callID || `${input.args.subagent_type}:${Date.now()}`

@@ -47,9 +47,6 @@ export const VoicePlugin: Plugin = async (ctx: PluginInput, pluginConfig?: Recor
     config.ttsEngine = "kokoro"
   }
 
-  console.log("[voice-plugin] loaded ttsEngine =", config.ttsEngine, "voice =", config.voice)
-  log("[voice-plugin] loaded", { ttsEngine: config.ttsEngine, voice: config.voice })
-
   // --- State ---
 
   // Audio subsystem
@@ -265,8 +262,6 @@ export const VoicePlugin: Plugin = async (ctx: PluginInput, pluginConfig?: Recor
       })
     })
 
-    log("[voice-plugin] SIGUSR1 trigger ready — activate with: kill -USR1", process.pid)
-    console.log(`[voice-plugin] 🎤 Voice input ready — trigger with: kill -USR1 ${process.pid}`)
   }
 
   // -----------------------------------------------------------------------

@@ -40,12 +40,12 @@ Add to your OpenCode config (`~/.opencode/config.json` or `<project>/.opencode/c
 ```json
 {
   "plugin": [
-    ["@mem-arch/memory", {}],
-    ["@mem-arch/coordination", {}],
-    ["@mem-arch/distribution", {}]
+    ["@mem-arch/memory", {}]
   ]
 }
 ```
+
+> **Note:** `@mem-arch/coordination` and `@mem-arch/distribution` are **libraries** (not standalone plugins) consumed by the memory plugin via dynamic imports. They do not need to be in the plugin list.
 
 ### 3. Apply OpenCode Custom Patches
 
@@ -183,17 +183,12 @@ OPENCODE_NODES="http://node1:8080:explore,code-reviewer|http://node2:8080:genera
       "analysisIntervalMessages": 10,
       "analysisTTL": 60000,
       "pruneAfterMs": 2592000000
-    }],
-    ["@mem-arch/coordination", {
-      "maxParallelTasks": 5,
-      "llmFallbackThreshold": 0.5
-    }],
-    ["@mem-arch/distribution", {
-      "healthCheckIntervalMs": 30000
     }]
   ]
 }
 ```
+
+> **Note:** Coordination and distribution options are configured internally via their library code and do not require plugin-level configuration.
 
 ---
 
@@ -236,14 +231,14 @@ User: "Refactor the entire auth module and update all test files"
 
 ### Coordinator guidance not appearing
 
-1. Verify `@mem-arch/coordination` is in the plugin list
+1. Verify `@mem-arch/memory` plugin is loaded (it handles all analysis)
 2. Analysis triggers every 10 messages — have at least 10 turns in the session
 3. Guidance is only injected when `confidence ≥ 0.5` — a goal-oriented message is needed to raise confidence
-4. Check that the coordinator agent is registered in the core registry
+4. The coordinator agent is built into OpenCode — no manual registration needed
 
 ### Memory search returns empty results
 
-1. Verify `@mem-arch/memory` is in the plugin list
+1. Verify `@mem-arch/memory` is in the plugin list (`~/.config/opencode/opencode.json`)
 2. Database is at `./.opencode/memory.db`
 3. Messages are captured on `chat.message` — ensure the plugin loaded before the conversation
 4. FTS5 uses MATCH syntax — try a single keyword for broad results; avoid very short words
@@ -313,6 +308,9 @@ mem-arch/
     │       ├── agent-registry.ts     # Skill/cost registry, selectAgent(), escalateAgent()
     │       ├── orchestrate.ts        # decomposeGoal(), executePlan() with escalation
     │       └── system-prompt.txt     # Coordinator LLM system prompt
+    │
+    > **Note:** `coordination` is a library imported dynamically by the memory plugin (e.g., `import("@mem-arch/coordination/analyze")`). It is not a standalone plugin.
+
     └── distribution/
         └── src/
             ├── index.ts              # Plugin: remote_task, find_nodes, health tools

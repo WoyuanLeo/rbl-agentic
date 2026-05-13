@@ -110,9 +110,7 @@ export function openDatabase(projectDir: string): MemoryDB {
     },
 
     queryMessages(params: QueryMessagesParams): MemoryRow[] {
-      const limit = params.limit ?? 10
-
-      // Fast path: no full-text search needed — skip FTS entirely
+      // Fast path: no full-text search needed
       if (!params.query) {
         const conditions: string[] = []
         const binds: (string | number)[] = []
@@ -120,21 +118,18 @@ export function openDatabase(projectDir: string): MemoryDB {
         if (params.role) { conditions.push("role = ?"); binds.push(params.role) }
         const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : ""
         const orderBy = params.rank_by === "oldest" ? "created_at ASC" : "created_at DESC"
-        return db.query(`SELECT * FROM memory ${where} ORDER BY ${orderBy} LIMIT ?`).all(...binds, limit) as MemoryRow[]
+        return db.prepare(`SELECT * FROM memory ${where} ORDER BY ${orderBy} LIMIT ?`).all(...binds, params.limit ?? 10) as MemoryRow[]
       }
 
-      // FTS path: isolate MATCH inside a subquery — SQLite FTS5 MATCH is incompatible
-      // with the INNER JOIN ... ON syntax and causes "near WHERE: syntax error".
-      // The subquery returns (rowid, rank) from FTS5; the outer query joins normally
-      // and applies any extra filters. FTS5 rank is negative BM25 — ASC = most relevant first.
+      // FTS path: isolate MATCH inside a subquery
       const binds: (string | number)[] = [params.query]
       const outerConditions: string[] = []
       if (params.session_id) { outerConditions.push("m.session_id = ?"); binds.push(params.session_id) }
       if (params.role) { outerConditions.push("m.role = ?"); binds.push(params.role) }
-      binds.push(limit)
+      binds.push(params.limit ?? 10)
 
       const outerWhere = outerConditions.length ? `WHERE ${outerConditions.join(" AND ")}` : ""
-      let orderBy = "fts.rank ASC"  // FTS5 rank: most negative = most relevant
+      let orderBy = "fts.rank ASC"
       if (params.rank_by === "newest") orderBy = "m.created_at DESC"
       if (params.rank_by === "oldest") orderBy = "m.created_at ASC"
 
@@ -144,7 +139,7 @@ export function openDatabase(projectDir: string): MemoryDB {
         ${outerWhere}
         ORDER BY ${orderBy}
         LIMIT ?`
-      return db.query(sql).all(...binds) as MemoryRow[]
+      return db.prepare(sql).all(...binds) as MemoryRow[]
     },
 
     getMemoryCount(): number {
@@ -174,14 +169,14 @@ export function openDatabase(projectDir: string): MemoryDB {
       }
 
       const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : ""
-      return db.query(
+      return db.prepare(
         `SELECT * FROM task_progress ${where} ORDER BY updated_at DESC`
       ).all(...binds) as TaskRow[]
     },
 
     pruneMemory(olderThanMs: number): number {
       const cutoff = Date.now() - olderThanMs
-      const result = db.run("DELETE FROM memory WHERE created_at < ?", [cutoff])
+      const result = db.prepare("DELETE FROM memory WHERE created_at < ?").run(cutoff)
       return result.changes
     },
   }
